@@ -1,0 +1,13 @@
+# Verified release archive hashes. Update deliberately with version bumps.
+# Tor values come from the Tor Project's signed-build checksum manifest.
+# sing-box does not publish a checksum asset; these values are independently
+# pinned after downloading the immutable GitHub release assets over TLS.
+5a8f19f5f119b5fa2a8fd799a3a532e3236ad36164241800d6302e32f0e1c2a9  tor-expert-bundle-linux-x86_64-15.0.19.tar.gz
+c99cf6f69740a443c7fffaf598ceb0952b3914041507c8afe11bed84a3333eb1  tor-expert-bundle-macos-aarch64-15.0.19.tar.gz
+95243f76bcf05d6179d017c3f3e4ece7b53cc58dff1ba617b03a2fe2c8298b5b  tor-expert-bundle-macos-x86_64-15.0.19.tar.gz
+6ac067402c7b4a3dc37887ed3754b3914b67fdc220c966190683e9ccf91abf0f  tor-expert-bundle-windows-x86_64-15.0.19.tar.gz
+73e8967b0fc08e17bce4263ca56ebc394822401a16497a1c4e02316c888202ab  sing-box-1.13.14-darwin-arm64.tar.gz
+5245d645e847f90bb708da74bc020ae078c28489690756419685c04f56b4e3bb  sing-box-1.13.14-darwin-amd64.tar.gz
+f48703461a15476951ac4967cdad339d986f4b8096b4eb3ff0829a500502d697  sing-box-1.13.14-linux-amd64.tar.gz
+4742df6a4314e8ecc41736849fca6d73b8f9e91b6e8b06ee794ff17ba180579e  sing-box-1.13.14-linux-arm64.tar.gz
+f580782c6dd10f7691c66cea1d7c421813c5fbf7e305d1ee7ce0c3a40d196341  sing-box-1.13.14-windows-amd64.zip

@@ -1,0 +1,1070 @@
+use std::sync::Mutex;
+
+use serde::{Deserialize, Serialize};
+use tauri::State;
+use tokio::process::Child;
+use tokio::sync::Mutex as AsyncMutex;
+
+use crate::bypass::{self, BypassHelpers, ShellHookStatus};
+use crate::ip::{self, IpReport};
+use crate::logs::{self, TorLogs};
+use crate::proxy::{self, ProxyStatus, SavedProxyState};
+use crate::settings::{self, AppSettings};
+use crate::tor::{self, CONTROL_PORT, DNS_PORT, SOCKS_HOST, SOCKS_PORT};
+
+pub struct AppState {
+    pub managed_tor: AsyncMutex<Option<Child>>,
+    pub managed_singbox: AsyncMutex<Option<Child>>,
+    pub managed_snowflake: AsyncMutex<Option<Child>>,
+    pub saved_proxy: Mutex<SavedProxyState>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            managed_tor: AsyncMutex::new(None),
+            managed_singbox: AsyncMutex::new(None),
+            managed_snowflake: AsyncMutex::new(None),
+            saved_proxy: Mutex::new(crate::session::load().original_proxy.unwrap_or_default()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppStatus {
+    pub tor_installed: bool,
+    pub tor_path: Option<String>,
+    pub socks_up: bool,
+    pub control_up: bool,
+    pub dns_up: bool,
+    pub remote_dns: bool,
+    pub bridges_enabled: bool,
+    pub bridge_count: usize,
+    pub smart_connect: bool,
+    pub exit_country: String,
+    pub bootstrap_progress: Option<u32>,
+    pub connection_mode: String,
+    pub kill_switch: bool,
+    pub pt: Vec<tor::PtStatus>,
+    pub tun: crate::tun::TunStatus,
+    pub firewall: crate::firewall::FirewallStatus,
+    pub deps: Vec<crate::deps::DepStatus>,
+    pub proxy: ProxyStatus,
+    pub socks_host: String,
+    pub socks_port: u16,
+    pub control_port: u16,
+    pub dns_port: u16,
+    pub install_hint: String,
+    pub persistence_changes: usize,
+}
+
+fn install_hint() -> String {
+    if tor::find_tor_binary().is_some() {
+        return "Using bundled or system Tor".into();
+    }
+    "Bundled Tor missing — developers: run npm run deps (scripts/download-deps.sh)".into()
+}
+
+#[tauri::command]
+pub async fn get_status() -> AppStatus {
+    let tor_path = tor::find_tor_binary().map(|p| p.display().to_string());
+    let settings = settings::load();
+    let socks_up = tor::socks_reachable();
+    let bootstrap_progress = if socks_up {
+        tor::bootstrap_progress().await.ok()
+    } else {
+        None
+    };
+    AppStatus {
+        tor_installed: tor_path.is_some(),
+        tor_path,
+        socks_up,
+        control_up: tor::control_reachable(),
+        dns_up: tor::dns_reachable(),
+        remote_dns: settings.remote_dns,
+        bridges_enabled: settings.bridges_enabled,
+        bridge_count: settings.bridge_lines.len(),
+        smart_connect: settings.smart_connect,
+        exit_country: settings.exit_country.clone(),
+        bootstrap_progress,
+        connection_mode: settings.connection_mode.clone(),
+        kill_switch: settings.kill_switch,
+        pt: tor::pt_status_all(),
+        tun: crate::tun::status(&None),
+        firewall: crate::firewall::status(),
+        deps: crate::deps::deps_status(),
+        proxy: proxy::get_status(),
+        socks_host: SOCKS_HOST.into(),
+        socks_port: SOCKS_PORT,
+        control_port: CONTROL_PORT,
+        dns_port: DNS_PORT,
+        install_hint: install_hint(),
+        persistence_changes: crate::workstation::persistence_change_count(),
+    }
+}
+
+#[tauri::command]
+pub fn get_settings() -> AppSettings {
+    settings::load()
+}
+
+#[tauri::command]
+pub fn update_settings(next: AppSettings) -> Result<AppSettings, String> {
+    settings::update(|s| *s = next)
+}
+
+/// Mark the first-run setup wizard complete (or dismissed).
+#[tauri::command]
+pub fn set_setup_complete(done: bool) -> Result<AppSettings, String> {
+    settings::update(|s| s.setup_complete = done)
+}
+
+/// Status of the installed privileged helper (installed/running).
+#[tauri::command]
+pub fn privileged_helper_status() -> crate::helper::HelperStatus {
+    crate::helper::service::status()
+}
+
+/// Install the privileged helper (one elevation prompt); afterwards privileged
+/// actions run without prompting.
+#[tauri::command]
+pub async fn install_privileged_helper() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(crate::helper::service::install)
+        .await
+        .map_err(|e| format!("task join error: {e}"))?
+}
+
+/// Remove the privileged helper.
+#[tauri::command]
+pub async fn remove_privileged_helper() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(crate::helper::service::uninstall)
+        .await
+        .map_err(|e| format!("task join error: {e}"))?
+}
+
+/// Trigger the admin authorization once so later privileged operations (system
+/// proxy, TUN, firewall, hardening) reuse the cached authorization instead of
+/// prompting repeatedly. Runs a trivial elevated no-op.
+#[tauri::command]
+pub async fn prime_admin_auth() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        crate::elevate::run_shell_with_prompt(
+            "/usr/bin/true",
+            "OnionGate needs administrator access once to set up secure routing \
+             (system proxy, TUN, and firewall). You can skip this and approve \
+             individual changes later.",
+        )
+    })
+    .await
+    .map_err(|e| format!("task join error: {e}"))??;
+    Ok("Administrator access granted for this session".into())
+}
+
+#[tauri::command]
+pub fn get_tor_logs() -> TorLogs {
+    logs::get_logs()
+}
+
+#[tauri::command]
+pub fn clear_tor_logs() -> Result<String, String> {
+    logs::clear()?;
+    Ok("Logs cleared".into())
+}
+
+#[tauri::command]
+pub async fn set_remote_dns(state: State<'_, AppState>, enabled: bool) -> Result<String, String> {
+    settings::set_remote_dns(enabled)?;
+
+    if !tor::socks_reachable() {
+        return Ok(if enabled {
+            "Remote DNS enabled. Start Tor to activate DNSPort 9053 (socks5h for app DNS).".into()
+        } else {
+            "Remote DNS disabled.".into()
+        });
+    }
+
+    // Prefer live SETCONF; fall back to managed restart so torrc DNSPort is applied.
+    match tor::apply_remote_dns(enabled).await {
+        Ok(msg) => {
+            if enabled && !tor::dns_reachable() {
+                let mut guard = state.managed_tor.lock().await;
+                let _ = tor::restart_managed_for_dns(&mut guard).await?;
+                return Ok(format!(
+                    "{msg}. Restarted Tor; DNSPort {} should be active for dig @{} -p {}",
+                    DNS_PORT, SOCKS_HOST, DNS_PORT
+                ));
+            }
+            Ok(msg)
+        }
+        Err(_) => {
+            let mut guard = state.managed_tor.lock().await;
+            tor::restart_managed_for_dns(&mut guard).await?;
+            Ok(if enabled {
+                format!(
+                    "Remote DNS on via managed Tor (DNSPort {SOCKS_HOST}:{DNS_PORT}). Use socks5h / Firefox socks_remote_dns; OS resolver may still leak for some apps."
+                )
+            } else {
+                "Remote DNS off; restarted Tor without DNSPort.".into()
+            })
+        }
+    }
+}
+
+async fn maybe_auto_enable_proxy(
+    state: &State<'_, AppState>,
+    msg: String,
+) -> Result<String, String> {
+    let settings = settings::load();
+    if settings.auto_enable_proxy && tor::socks_reachable() {
+        let mut saved = state
+            .saved_proxy
+            .lock()
+            .map_err(|_| "State lock poisoned".to_string())?;
+        if crate::session::load().original_proxy.is_none() {
+            let snapshot = proxy::capture()?;
+            crate::session::record_proxy_before(snapshot.clone())?;
+            *saved = snapshot;
+        }
+        match proxy::enable(&mut saved) {
+            Ok(pmsg) => {
+                crate::logs::append(&pmsg);
+                return Ok(format!("{msg}. {pmsg}"));
+            }
+            Err(e) => {
+                crate::logs::append(format!("Auto-enable proxy failed: {e}"));
+                return Ok(format!("{msg}. Proxy not enabled: {e}"));
+            }
+        }
+    }
+    Ok(msg)
+}
+
+#[tauri::command]
+pub async fn start_tor(state: State<'_, AppState>) -> Result<String, String> {
+    crate::session::begin_connect()?;
+    let settings = settings::load();
+    crate::session::expect_transports(
+        tor::pt::transports_from_bridge_lines(&settings.bridge_lines)
+            .into_iter()
+            .map(|transport| transport.as_str().to_string())
+            .collect(),
+    )?;
+    let msg = {
+        let mut guard = state.managed_tor.lock().await;
+        if settings.smart_connect {
+            let result = tor::smart_connect(&mut guard).await?;
+            result.message
+        } else {
+            let m = tor::start_tor(&mut guard).await?;
+            let strat = if settings.bridges_enabled {
+                "bridges"
+            } else {
+                "direct"
+            };
+            let _ = crate::db::start_session(strat, &settings.connection_mode);
+            m
+        }
+    };
+    crate::logs::append(&msg);
+
+    let mut parts = vec![msg];
+
+    if settings.connection_mode == "tun" {
+        crate::session::expect_tun(true)?;
+        let mut sb = state.managed_singbox.lock().await;
+        match crate::tun::start(&mut sb).await {
+            Ok(tmsg) => {
+                crate::logs::append(&tmsg);
+                parts.push(tmsg);
+            }
+            Err(e) => {
+                crate::logs::append(format!("TUN start failed: {e}"));
+                // Fail closed: do not report a successful "connect" in TUN mode.
+                let _ = settings::update(|s| s.connection_mode = "proxy".into());
+                let _ = crate::tun::stop(&mut sb).await;
+                let _ = crate::session::set_phase(
+                    crate::session::SessionPhase::Degraded,
+                    Some(e.clone()),
+                );
+                return Err(format!(
+                    "Tor is up, but TUN was not started ({e}). Switched back to Proxy mode."
+                ));
+            }
+        }
+        if settings.kill_switch {
+            crate::session::expect_firewall(true)?;
+            match crate::firewall::enable_kill_switch().await {
+                Ok(kmsg) => {
+                    crate::logs::append(&kmsg);
+                    parts.push(kmsg);
+                }
+                Err(e) => {
+                    // TUN is up; kill-switch failure is non-fatal but visible.
+                    parts.push(format!("Kill switch not enabled: {e}"));
+                }
+            }
+        }
+        crate::session::set_phase(crate::session::SessionPhase::Protected, None)?;
+        return Ok(parts.join(". "));
+    }
+
+    let result = maybe_auto_enable_proxy(&state, parts.join(". ")).await;
+    match &result {
+        Ok(_) => {
+            crate::session::set_phase(crate::session::SessionPhase::Protected, None)?;
+        }
+        Err(error) => {
+            let _ = crate::session::set_phase(
+                crate::session::SessionPhase::Degraded,
+                Some(error.clone()),
+            );
+        }
+    }
+    result
+}
+
+#[tauri::command]
+pub async fn smart_connect(state: State<'_, AppState>) -> Result<tor::SmartConnectResult, String> {
+    crate::session::begin_connect()?;
+    let result = {
+        let mut guard = state.managed_tor.lock().await;
+        tor::smart_connect(&mut guard).await?
+    };
+    let transports = if result.strategy == "builtin:snowflake" {
+        vec!["snowflake".into()]
+    } else {
+        tor::pt::transports_from_bridge_lines(&settings::load().bridge_lines)
+            .into_iter()
+            .map(|transport| transport.as_str().to_string())
+            .collect()
+    };
+    crate::session::expect_transports(transports)?;
+    crate::logs::append(&result.message);
+    let _ = maybe_auto_enable_proxy(&state, result.message.clone()).await?;
+    crate::session::set_phase(crate::session::SessionPhase::Protected, None)?;
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn get_bridge_lines() -> Vec<String> {
+    settings::load().bridge_lines
+}
+
+#[tauri::command]
+pub fn set_bridge_lines(text: String) -> Result<AppSettings, String> {
+    let lines = tor::bridges::parse_bridge_lines(&text);
+    settings::update(|s| {
+        s.bridge_lines = lines;
+        if !s.bridge_lines.is_empty() {
+            s.bridge_source = "custom".into();
+            s.last_connect_strategy = "bridges".into();
+        }
+    })
+}
+
+#[tauri::command]
+pub fn set_bridges_enabled(enabled: bool) -> Result<AppSettings, String> {
+    if enabled && settings::load().bridge_lines.is_empty() {
+        return Err("Add at least one bridge line before enabling".into());
+    }
+    settings::update(|s| {
+        if enabled {
+            s.bridges_enabled = true;
+            // Home "None" forces bridges off in normalize — leave that mode when enabling.
+            if s.bridge_source == "none" || s.bridge_source.is_empty() {
+                s.bridge_source = "custom".into();
+            }
+            s.last_connect_strategy = "bridges".into();
+        } else {
+            s.bridges_enabled = false;
+        }
+    })
+}
+
+#[tauri::command]
+pub async fn apply_tor_config(state: State<'_, AppState>) -> Result<String, String> {
+    // Bridges / PT / exit pin need a managed restart so torrc is authoritative.
+    let mut guard = state.managed_tor.lock().await;
+    let msg = tor::restart_managed(&mut guard).await?;
+    crate::logs::append(&msg);
+    Ok(msg)
+}
+
+#[tauri::command]
+pub async fn set_exit_country(
+    state: State<'_, AppState>,
+    country: String,
+) -> Result<String, String> {
+    let settings = settings::update(|s| s.exit_country = country.clone())?;
+    let cc = settings.exit_country.clone();
+
+    if !tor::control_reachable() {
+        return Ok(if cc.is_empty() {
+            "Exit pin cleared. Start Tor to apply.".into()
+        } else {
+            format!("Exit pin set to {{{cc}}}. Start Tor (or Apply) to use it.")
+        });
+    }
+
+    match tor::apply_exit_country(&cc).await {
+        Ok(msg) => Ok(msg),
+        Err(_) => {
+            let mut guard = state.managed_tor.lock().await;
+            tor::restart_managed(&mut guard).await?;
+            Ok(if cc.is_empty() {
+                "Exit pin cleared; Tor restarted.".into()
+            } else {
+                format!("Exit pin {{{cc}}} applied via Tor restart.")
+            })
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn fetch_bridges() -> Result<tor::bridges::FetchBridgesResult, String> {
+    tor::bridges::fetch_bridge_lines_for("obfs4").await
+}
+
+#[tauri::command]
+pub async fn fetch_bridges_for(
+    transport: String,
+) -> Result<tor::bridges::FetchBridgesResult, String> {
+    tor::bridges::fetch_bridge_lines_for(&transport).await
+}
+
+#[tauri::command]
+pub async fn test_onion_connectivity(
+    host: String,
+    port: u16,
+) -> Result<tor::onion::OnionConnectivityResult, String> {
+    tor::onion::test_connectivity(&host, port).await
+}
+
+#[tauri::command]
+pub async fn run_leak_verifier() -> crate::verify::LeakReport {
+    crate::verify::run().await
+}
+
+#[tauri::command]
+pub fn get_latest_leak_report() -> Result<Option<crate::verify::LeakReport>, String> {
+    crate::db::latest_leak_report()
+}
+
+#[tauri::command]
+pub fn export_latest_leak_report(path: String) -> Result<String, String> {
+    let report = crate::db::latest_leak_report()?
+        .ok_or_else(|| "Run the leak verifier before exporting".to_string())?;
+    let json = serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| format!("Failed to export report: {e}"))?;
+    Ok(format!("Exported redacted report to {path}"))
+}
+
+#[tauri::command]
+pub async fn start_onion_service(
+    local_port: u16,
+    virtual_port: u16,
+    private: bool,
+) -> Result<crate::onion_service::OnionProject, String> {
+    crate::onion_service::start(local_port, virtual_port, private).await
+}
+
+#[tauri::command]
+pub fn list_onion_services() -> Vec<crate::onion_service::OnionProject> {
+    crate::onion_service::list()
+}
+
+#[tauri::command]
+pub async fn stop_onion_service(service_id: String) -> Result<String, String> {
+    crate::onion_service::stop(&service_id).await
+}
+
+#[tauri::command]
+pub async fn audit_onion_service(
+    service_id: String,
+) -> Result<crate::onion_service::audit::OnionAudit, String> {
+    crate::onion_service::audit(&service_id).await
+}
+
+#[tauri::command]
+pub fn get_workstation_posture() -> Vec<crate::workstation::PostureCheck> {
+    crate::workstation::posture()
+}
+
+#[tauri::command]
+pub fn get_persistence_report() -> Result<crate::workstation::PersistenceReport, String> {
+    crate::workstation::persistence()
+}
+
+#[tauri::command]
+pub fn save_persistence_baseline() -> Result<String, String> {
+    crate::workstation::save_persistence_baseline()
+}
+
+#[tauri::command]
+pub fn inspect_artifact(path: String) -> Result<crate::workstation::ArtifactReport, String> {
+    crate::workstation::inspect_artifact(&path)
+}
+
+#[tauri::command]
+pub fn get_host_security_tools() -> Vec<crate::workstation::HostTool> {
+    crate::workstation::host_tools()
+}
+
+/// Explicit Background/Login Items scan (`sfltool dumpbtm`). Runs only on user
+/// request so the Full Disk Access prompt is not raised repeatedly.
+#[tauri::command]
+pub fn scan_login_items() -> crate::workstation::LoginItemsSnapshot {
+    crate::workstation::login_items_snapshot()
+}
+
+/// Open the Full Disk Access settings pane so the user can grant access once.
+#[tauri::command]
+pub fn open_full_disk_access_settings() -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+            .status()
+            .map_err(|e| e.to_string())?;
+        Ok("Opened Full Disk Access settings — enable OnionGate, then scan again.".into())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("Full Disk Access settings are macOS only".into())
+    }
+}
+
+#[tauri::command]
+pub fn save_bridge_library(lines: Vec<String>) -> Result<String, String> {
+    let n = crate::db::save_library_lines(&lines)?;
+    Ok(format!("Saved {n} bridge(s) to library"))
+}
+
+#[tauri::command]
+pub fn list_bridge_library() -> Result<Vec<String>, String> {
+    crate::db::list_library()
+}
+
+#[tauri::command]
+pub async fn get_session_overview() -> crate::db::SessionOverview {
+    let connected = tor::socks_reachable();
+    if connected {
+        if let (Ok((r, w)), Ok(c)) = (tor::traffic_counters().await, tor::circuit_count().await) {
+            let _ = crate::db::sample_traffic(r, w, c);
+        }
+    }
+    crate::db::overview(connected)
+}
+
+#[tauri::command]
+pub fn scan_bridges(lines: Option<Vec<String>>) -> Vec<tor::bridges::BridgeScanResult> {
+    let list = lines.unwrap_or_else(|| settings::load().bridge_lines);
+    tor::bridges::scan_bridges(&list)
+}
+
+#[tauri::command]
+pub async fn apply_scanned_bridges(
+    state: State<'_, AppState>,
+    lines: Vec<String>,
+    enable: bool,
+) -> Result<String, String> {
+    let parsed = lines
+        .iter()
+        .filter_map(|l| tor::bridges::normalize_bridge_line(l))
+        .collect::<Vec<_>>();
+    settings::update(|s| {
+        s.bridge_lines = parsed;
+        s.bridges_enabled = enable && !s.bridge_lines.is_empty();
+        if enable && !s.bridge_lines.is_empty() {
+            s.bridge_source = "custom".into();
+        }
+    })?;
+
+    if tor::socks_reachable() || enable {
+        let mut guard = state.managed_tor.lock().await;
+        let msg = tor::restart_managed(&mut guard).await?;
+        return Ok(format!(
+            "Applied {} bridge(s). {msg}",
+            settings::load().bridge_lines.len()
+        ));
+    }
+    Ok(format!(
+        "Saved {} bridge(s). Start Tor to connect.",
+        settings::load().bridge_lines.len()
+    ))
+}
+
+#[tauri::command]
+pub async fn get_bootstrap_progress() -> Result<u32, String> {
+    tor::bootstrap_progress().await
+}
+
+#[tauri::command]
+pub async fn search_relays(
+    query: String,
+    limit: Option<u32>,
+) -> Result<Vec<crate::routing::RelayInfo>, String> {
+    crate::routing::search_relays(&query, limit.unwrap_or(20) as usize).await
+}
+
+#[tauri::command]
+pub fn pin_relay(role: String, fingerprint: String) -> Result<AppSettings, String> {
+    let fp = fingerprint.trim().to_uppercase();
+    if fp.len() < 16 {
+        return Err("Fingerprint looks too short".into());
+    }
+    match role.as_str() {
+        "entry" | "middle" | "exit" => {}
+        _ => return Err("role must be entry, middle, or exit".into()),
+    }
+    settings::update(|s| match role.as_str() {
+        "entry" => s.entry_nodes = fp,
+        "middle" => s.middle_nodes = fp,
+        "exit" => {
+            s.exit_nodes_fp = fp;
+            s.exit_country.clear();
+        }
+        _ => {}
+    })
+}
+
+#[tauri::command]
+pub fn clear_relay_pins() -> Result<AppSettings, String> {
+    settings::update(|s| {
+        s.entry_nodes.clear();
+        s.middle_nodes.clear();
+        s.exit_nodes_fp.clear();
+    })
+}
+
+#[tauri::command]
+pub fn set_split_tunnel(enabled: bool, apps: String) -> Result<AppSettings, String> {
+    let list: Vec<String> = apps
+        .split(|c| c == ',' || c == '\n')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    settings::update(|s| {
+        s.split_tunnel = enabled;
+        s.split_tunnel_apps = list;
+    })
+}
+
+#[tauri::command]
+pub fn set_app_routing(
+    enabled: bool,
+    policy: String,
+    session_guard: bool,
+    apps: Vec<crate::settings::AppIdentity>,
+) -> Result<AppSettings, String> {
+    settings::update(|s| {
+        s.split_tunnel = enabled;
+        s.app_routing_policy = policy;
+        s.session_guard = session_guard;
+        s.route_apps = apps;
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppRouteStatus {
+    pub id: String,
+    pub label: String,
+    pub running: bool,
+    pub routed: bool,
+    pub exit_ip: Option<String>,
+    pub detail: String,
+}
+
+fn identity_running(app: &crate::settings::AppIdentity) -> bool {
+    let output = if !app.executable_path.is_empty() {
+        std::process::Command::new("pgrep")
+            .args(["-f", &app.executable_path])
+            .output()
+    } else {
+        std::process::Command::new("pgrep")
+            .args(["-x", &app.process_name])
+            .output()
+    };
+    output
+        .map(|result| result.status.success() && !result.stdout.is_empty())
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+pub async fn get_app_route_statuses() -> Vec<AppRouteStatus> {
+    let settings = settings::load();
+    let protected = tor::socks_reachable() && crate::tun::process_seems_running();
+    let mut statuses = Vec::new();
+    for (index, app) in settings.route_apps.iter().enumerate() {
+        let selected_through_tor = settings.app_routing_policy == "only";
+        let routed = settings.split_tunnel && protected && selected_through_tor;
+        let exit_ip = if routed {
+            crate::ip::fetch_via_isolated(index, app.circuit_epoch)
+                .await
+                .ok()
+        } else {
+            None
+        };
+        statuses.push(AppRouteStatus {
+            id: app.id.clone(),
+            label: app.label.clone(),
+            running: identity_running(app),
+            routed,
+            exit_ip,
+            detail: if routed {
+                "Dedicated IsolateSOCKSAuth circuit is reachable".into()
+            } else if settings.app_routing_policy == "except" {
+                "Selected as a direct-route exception".into()
+            } else if !protected {
+                "TUN or Tor is not active".into()
+            } else {
+                "Application routing is disabled".into()
+            },
+        });
+    }
+    statuses
+}
+
+#[tauri::command]
+pub async fn rotate_app_circuit(
+    state: State<'_, AppState>,
+    app_id: String,
+) -> Result<String, String> {
+    let saved = settings::update(|s| {
+        if let Some(app) = s.route_apps.iter_mut().find(|app| app.id == app_id) {
+            app.circuit_epoch = app.circuit_epoch.saturating_add(1);
+        }
+    })?;
+    let app = saved
+        .route_apps
+        .iter()
+        .find(|app| app.id == app_id)
+        .ok_or_else(|| "Application identity not found".to_string())?;
+    if crate::tun::process_seems_running() {
+        let mut managed = state.managed_singbox.lock().await;
+        crate::tun::stop(&mut managed).await?;
+        crate::tun::start(&mut managed).await?;
+    }
+    Ok(format!(
+        "Rotated isolated circuit credentials for {}",
+        app.label
+    ))
+}
+
+/// Open a native file picker and resolve a process name for TUN split tunnel.
+///
+/// Must be `async`: `blocking_pick_file` must not run on the main thread or the
+/// app freezes/deadlocks with the event loop (especially on macOS).
+#[tauri::command]
+pub async fn pick_split_app(
+    app: tauri::AppHandle,
+) -> Result<Option<crate::detect::SplitAppPick>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title("Add app to split tunnel")
+        .set_can_create_directories(false);
+
+    #[cfg(target_os = "macos")]
+    {
+        dialog = dialog
+            .set_directory("/Applications")
+            .add_filter("Applications", &["app"]);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let home_apps = dirs::home_dir()
+            .map(|h| h.join(".local/share/applications"))
+            .filter(|p| p.is_dir());
+        if let Some(dir) = home_apps {
+            dialog = dialog.set_directory(dir);
+        } else {
+            dialog = dialog.set_directory("/usr/share/applications");
+        }
+        // No extension filter: pick .desktop entries or binaries under /usr/bin, etc.
+    }
+
+    // Runs on a worker thread because this command is async.
+    let Some(file) = dialog.blocking_pick_file() else {
+        return Ok(None);
+    };
+    let path = file
+        .into_path()
+        .map_err(|e| format!("Could not resolve path: {e}"))?;
+    Ok(Some(crate::detect::resolve_split_app(&path)?))
+}
+
+#[tauri::command]
+pub fn get_snowflake_status(state: State<'_, AppState>) -> crate::snowflake::SnowflakeStatus {
+    match state.managed_snowflake.try_lock() {
+        Ok(guard) => crate::snowflake::status(&guard),
+        Err(_) => crate::snowflake::status(&None),
+    }
+}
+
+#[tauri::command]
+pub async fn start_snowflake(state: State<'_, AppState>) -> Result<String, String> {
+    let mut guard = state.managed_snowflake.lock().await;
+    crate::snowflake::start(&mut guard).await
+}
+
+#[tauri::command]
+pub async fn stop_snowflake(state: State<'_, AppState>) -> Result<String, String> {
+    let mut guard = state.managed_snowflake.lock().await;
+    crate::snowflake::stop(&mut guard).await
+}
+
+#[tauri::command]
+pub fn get_harden_items() -> Vec<crate::harden::HardenItem> {
+    crate::harden::list()
+}
+
+#[tauri::command]
+pub async fn apply_harden(id: String, enable: bool) -> Result<String, String> {
+    crate::harden::apply(&id, enable).await
+}
+
+#[tauri::command]
+pub async fn stop_tor(state: State<'_, AppState>) -> Result<String, String> {
+    let _ = crate::db::end_session();
+    // Full session teardown: TUN, kill switch, system proxy, snowflake, Tor, PT orphans.
+    crate::cleanup::teardown_session(
+        &state.managed_tor,
+        &state.managed_singbox,
+        &state.managed_snowflake,
+        &state.saved_proxy,
+    )
+    .await
+}
+
+#[tauri::command]
+pub fn get_recovery_status() -> crate::session::RecoveryStatus {
+    crate::session::recovery_status()
+}
+
+#[tauri::command]
+pub async fn emergency_restore(state: State<'_, AppState>) -> Result<String, String> {
+    let _ = crate::db::end_session();
+    crate::cleanup::teardown_session(
+        &state.managed_tor,
+        &state.managed_singbox,
+        &state.managed_snowflake,
+        &state.saved_proxy,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn start_tun(state: State<'_, AppState>) -> Result<String, String> {
+    if !tor::socks_reachable() {
+        return Err("Start Tor before enabling TUN mode".into());
+    }
+    crate::session::expect_tun(true)?;
+    let mut sb = state.managed_singbox.lock().await;
+    match crate::tun::start(&mut sb).await {
+        Ok(msg) => {
+            settings::update(|s| s.connection_mode = "tun".into())?;
+            let settings = settings::load();
+            if settings.kill_switch {
+                crate::session::expect_firewall(true)?;
+                match crate::firewall::enable_kill_switch().await {
+                    Ok(k) => Ok(format!("{msg}. {k}")),
+                    Err(e) => Ok(format!("{msg}. Kill switch not enabled: {e}")),
+                }
+            } else {
+                Ok(msg)
+            }
+        }
+        Err(e) => {
+            let _ = settings::update(|s| s.connection_mode = "proxy".into());
+            let _ = crate::tun::stop(&mut sb).await;
+            Err(e)
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn stop_tun(state: State<'_, AppState>) -> Result<String, String> {
+    let mut sb = state.managed_singbox.lock().await;
+    let msg = crate::tun::stop(&mut sb).await?;
+    crate::session::expect_tun(false)?;
+    settings::update(|s| s.connection_mode = "proxy".into())?;
+    Ok(msg)
+}
+
+#[tauri::command]
+pub async fn set_kill_switch(enabled: bool) -> Result<String, String> {
+    settings::update(|s| s.kill_switch = enabled)?;
+    if enabled {
+        crate::session::expect_firewall(true)?;
+        crate::firewall::enable_kill_switch().await
+    } else {
+        let result = crate::firewall::disable_kill_switch().await;
+        if result.is_ok() {
+            crate::session::expect_firewall(false)?;
+        }
+        result
+    }
+}
+
+#[tauri::command]
+pub fn set_connection_mode(mode: String) -> Result<AppSettings, String> {
+    settings::update(|s| s.connection_mode = mode)
+}
+
+#[tauri::command]
+pub fn enable_proxy(state: State<'_, AppState>) -> Result<String, String> {
+    if !tor::socks_reachable() {
+        return Err("Tor SOCKS is not reachable on 127.0.0.1:9050. Start Tor first.".into());
+    }
+    let mut saved = state
+        .saved_proxy
+        .lock()
+        .map_err(|_| "State lock poisoned".to_string())?;
+    if crate::session::load().original_proxy.is_none() {
+        let snapshot = proxy::capture()?;
+        crate::session::record_proxy_before(snapshot.clone())?;
+        *saved = snapshot;
+    }
+    proxy::enable(&mut saved)
+}
+
+#[tauri::command]
+pub fn disable_proxy(state: State<'_, AppState>) -> Result<String, String> {
+    let mut saved = state
+        .saved_proxy
+        .lock()
+        .map_err(|_| "State lock poisoned".to_string())?;
+    let result = proxy::disable(&mut saved);
+    if result.is_ok() {
+        let _ = crate::session::update(|j| {
+            j.proxy_changed = false;
+            j.original_proxy = None;
+        });
+    }
+    result
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewIdentityResult {
+    pub message: String,
+    pub ips: IpReport,
+}
+
+#[tauri::command]
+pub async fn new_identity(state: State<'_, AppState>) -> Result<NewIdentityResult, String> {
+    {
+        let mut guard = state.managed_tor.lock().await;
+        tor::ensure_tor_with_control(&mut guard).await?;
+    }
+    let message = tor::new_identity().await?;
+    let _ = crate::db::bump_identity();
+    // Wait for circuits and retry Tor IP so the UI does not show a transient failure.
+    let ips = ip::refresh_ips_after_newnym().await;
+    let message = match (&ips.tor_ip, &ips.tor_location) {
+        (Some(ip), Some(loc)) => format!("{message}. Tor IP: {ip} ({})", loc.label),
+        (Some(ip), None) => format!("{message}. Tor IP: {ip}"),
+        _ => format!(
+            "{message}. Tor IP not ready yet: {}",
+            ips.tor_error.as_deref().unwrap_or("unknown error")
+        ),
+    };
+    Ok(NewIdentityResult { message, ips })
+}
+
+#[tauri::command]
+pub async fn refresh_ips() -> IpReport {
+    ip::refresh_ips().await
+}
+
+#[tauri::command]
+pub fn get_bypass_helpers() -> BypassHelpers {
+    bypass::helpers()
+}
+
+#[tauri::command]
+pub fn write_shell_env() -> Result<String, String> {
+    bypass::write_shell_env()
+}
+
+#[tauri::command]
+pub fn get_shell_hook_status() -> ShellHookStatus {
+    bypass::shell_hook_status()
+}
+
+#[tauri::command]
+pub fn install_shell_hook() -> Result<String, String> {
+    bypass::install_shell_hook()
+}
+
+#[tauri::command]
+pub fn uninstall_shell_hook() -> Result<String, String> {
+    bypass::uninstall_shell_hook()
+}
+
+#[tauri::command]
+pub fn write_firefox_user_js() -> Result<String, String> {
+    bypass::write_firefox_user_js()
+}
+
+#[tauri::command]
+pub fn detect_apps() -> crate::detect::DetectReport {
+    crate::detect::detect_apps()
+}
+
+#[tauri::command]
+pub fn exit_country_options() -> Vec<crate::detect::ExitCountryOption> {
+    crate::detect::exit_country_options()
+}
+
+#[tauri::command]
+pub fn get_advanced_status() -> bypass::AdvancedStatus {
+    bypass::advanced_status()
+}
+
+#[tauri::command]
+pub fn configure_advanced_item(id: String) -> Result<String, String> {
+    bypass::configure_item(&id)
+}
+
+#[tauri::command]
+pub fn remove_advanced_item(id: String) -> Result<String, String> {
+    bypass::remove_item(&id)
+}
+
+#[tauri::command]
+pub fn get_shell_proxy_status() -> bypass::ShellProxyStatus {
+    bypass::shell_proxy_status()
+}
+
+#[tauri::command]
+pub fn set_shell_proxy_mode(mode: String) -> Result<String, String> {
+    bypass::set_shell_proxy_mode(&mode)
+}
+
+#[tauri::command]
+pub async fn test_network() -> ip::NetworkTestResult {
+    ip::test_network().await
+}
+
+#[tauri::command]
+pub fn detect_vpn() -> crate::vpn_detect::VpnStatus {
+    crate::vpn_detect::detect()
+}
+
+#[tauri::command]
+pub fn get_macports_status() -> crate::harden::MacPortsStatus {
+    crate::harden::macports_status()
+}
+
+#[tauri::command]
+pub fn open_macports_download() -> Result<String, String> {
+    crate::harden::open_macports_download()
+}
+
+#[tauri::command]
+pub fn get_kill_siri_status() -> crate::harden::KillSiriStatus {
+    crate::harden::kill_siri_status()
+}

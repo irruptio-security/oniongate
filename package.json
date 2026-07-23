@@ -1,0 +1,55 @@
+{
+  "name": "oniongate",
+  "private": true,
+  "version": "0.2.0",
+  "description": "OnionGate — isolated Tor app routing, Onion Lab, and leak verification",
+  "type": "module",
+  "engines": {
+    "node": ">=24.18.0 <25"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && cargo test --manifest-path src-tauri/Cargo.toml",
+    "lint:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets",
+    "fmt:check": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check",
+    "preview": "vite preview",
+    "deps": "bash scripts/download-deps.sh",
+    "ensure-deps": "bash scripts/download-deps.sh",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@radix-ui/react-label": "^2.1.12",
+    "@radix-ui/react-scroll-area": "^1.2.15",
+    "@radix-ui/react-select": "^2.3.4",
+    "@radix-ui/react-separator": "^1.1.12",
+    "@radix-ui/react-slot": "^1.3.0",
+    "@radix-ui/react-switch": "^1.3.4",
+    "@radix-ui/react-tabs": "^1.1.18",
+    "@radix-ui/react-tooltip": "^1.2.13",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
+    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.25.0",
+    "qrcode.react": "^4.2.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@tauri-apps/cli": "^2",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.4"
+  }
+}

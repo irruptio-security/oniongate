@@ -1,0 +1,66 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OnionGate",
+  "version": "0.2.0",
+  "identifier": "com.adamsiwiec.oniongate",
+  "build": {
+    "beforeDevCommand": "npm run ensure-deps && npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run ensure-deps && npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "OnionGate",
+        "width": 960,
+        "height": 640,
+        "minWidth": 800,
+        "minHeight": 560,
+        "resizable": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "acceptFirstMouse": true,
+        "trafficLightPosition": {
+          "x": 14,
+          "y": 18
+        },
+        "backgroundColor": "#f0ebf5"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/tor",
+      "binaries/sing-box",
+      "binaries/lyrebird",
+      "binaries/obfs4proxy"
+    ],
+    "resources": [
+      "resources/runtime/**/*",
+      "resources/licenses/**/*"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU5MTU3N0M3REQ0NUY3N0MKUldSODkwWGR4M2NWNlNTUzl5c2JJRWtUY05sMGJtQVU1aDRLMXU5VlQ1OTRtZkM5ZHdUeXhRaFQK",
+      "endpoints": [
+        "https://github.com/adamsiwiec/oniongate/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

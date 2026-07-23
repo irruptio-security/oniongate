@@ -1,0 +1,257 @@
+use std::fs;
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct AppIdentity {
+    pub id: String,
+    pub label: String,
+    pub process_name: String,
+    pub executable_path: String,
+    pub bundle_id: Option<String>,
+    pub signing_id: Option<String>,
+    pub circuit_epoch: u64,
+}
+
+impl Default for AppIdentity {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            label: String::new(),
+            process_name: String::new(),
+            executable_path: String::new(),
+            bundle_id: None,
+            signing_id: None,
+            circuit_epoch: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppSettings {
+    /// Prefer remote DNS: Tor DNSPort + socks5h / socks_remote_dns helpers.
+    pub remote_dns: bool,
+    /// When Tor starts successfully, also enable the system SOCKS proxy.
+    pub auto_enable_proxy: bool,
+    /// When Tor stops, disable the system SOCKS proxy (recommended).
+    pub auto_disable_proxy: bool,
+    /// Tor log verbosity written to tor.log
+    pub log_level: String,
+    /// Poll status interval in the UI (seconds)
+    pub status_poll_secs: u32,
+    /// UI language (`auto`, `en`, `ru`, `fa`, `zh-CN`, `tr`).
+    pub locale: String,
+    /// UI theme (`auto`, `light`, `dark`).
+    pub theme: String,
+    /// Bootstrap Tor with current settings on Connect (does not manage bridges).
+    pub smart_connect: bool,
+    /// Use Bridge lines from bridge_lines in managed torrc.
+    pub bridges_enabled: bool,
+    /// Normalized `Bridge …` lines.
+    pub bridge_lines: Vec<String>,
+    /// ISO 3166-1 alpha-2 exit country pin (empty = any).
+    pub exit_country: String,
+    /// Last successful Smart Connect strategy (`direct` | `bridges` | `bridges:obfs4` …).
+    pub last_connect_strategy: String,
+    /// Network key (e.g. gw:…) when last strategy succeeded.
+    pub last_network_key: String,
+    /// Human-readable reason the most recent strategy was selected.
+    pub last_connect_reason: String,
+    /// Bridge catalog mode: `auto` | `custom` | `transport:obfs4` | …
+    pub bridge_source: String,
+    /// `proxy` (OS SOCKS) or `tun` (sing-box system-wide).
+    pub connection_mode: String,
+    /// Block UDP/QUIC leaks; pair with TUN strict_route for stronger fail-closed.
+    pub kill_switch: bool,
+    /// TUN only: route listed process names through Tor; everything else direct.
+    pub split_tunnel: bool,
+    /// Process names for split tunnel allowlist (empty = all via Tor when split off).
+    pub split_tunnel_apps: Vec<String>,
+    /// Stable application identities used by isolated TUN routing.
+    pub route_apps: Vec<AppIdentity>,
+    /// `only` routes selected apps; `except` routes everything except selected apps.
+    pub app_routing_policy: String,
+    /// Suspend selected apps if their isolated Tor route disappears.
+    pub session_guard: bool,
+    /// Incrementing nonce used to rotate per-app SOCKS authentication circuits.
+    pub circuit_epoch: u64,
+    /// Preferred entry/middle/exit fingerprints (Classic torrc).
+    pub entry_nodes: String,
+    pub middle_nodes: String,
+    pub exit_nodes_fp: String,
+    /// First-run setup wizard has been completed/dismissed.
+    pub setup_complete: bool,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            remote_dns: true,
+            auto_enable_proxy: false,
+            auto_disable_proxy: true,
+            log_level: "notice".into(),
+            status_poll_secs: 4,
+            locale: "auto".into(),
+            theme: "auto".into(),
+            smart_connect: true,
+            bridges_enabled: false,
+            bridge_lines: Vec::new(),
+            exit_country: String::new(),
+            last_connect_strategy: "direct".into(),
+            last_network_key: String::new(),
+            last_connect_reason: String::new(),
+            bridge_source: "none".into(),
+            connection_mode: "proxy".into(),
+            kill_switch: false,
+            split_tunnel: false,
+            split_tunnel_apps: Vec::new(),
+            route_apps: Vec::new(),
+            app_routing_policy: "only".into(),
+            session_guard: false,
+            circuit_epoch: 0,
+            entry_nodes: String::new(),
+            middle_nodes: String::new(),
+            exit_nodes_fp: String::new(),
+            setup_complete: false,
+        }
+    }
+}
+
+fn settings_path() -> Result<PathBuf, String> {
+    let base = dirs::data_local_dir()
+        .ok_or_else(|| "Could not resolve local data directory".to_string())?
+        .join("tor-socks-gui");
+    fs::create_dir_all(&base).map_err(|e| format!("Failed to create data dir: {e}"))?;
+    Ok(base.join("settings.json"))
+}
+
+pub fn load() -> AppSettings {
+    let Ok(path) = settings_path() else {
+        return AppSettings::default();
+    };
+    let Ok(raw) = fs::read_to_string(path) else {
+        return AppSettings::default();
+    };
+    let mut settings: AppSettings = serde_json::from_str(&raw).unwrap_or_default();
+    normalize(&mut settings);
+    settings
+}
+
+pub fn save(settings: &AppSettings) -> Result<(), String> {
+    let path = settings_path()?;
+    let raw = serde_json::to_string_pretty(settings)
+        .map_err(|e| format!("Failed to serialize settings: {e}"))?;
+    fs::write(&path, raw).map_err(|e| format!("Failed to write settings: {e}"))
+}
+
+fn normalize(settings: &mut AppSettings) {
+    if !matches!(
+        settings.log_level.as_str(),
+        "err" | "warn" | "notice" | "info" | "debug"
+    ) {
+        settings.log_level = "notice".into();
+    }
+    settings.status_poll_secs = settings.status_poll_secs.clamp(2, 60);
+    if !matches!(
+        settings.locale.as_str(),
+        "auto" | "en" | "ru" | "fa" | "zh-CN" | "tr"
+    ) {
+        settings.locale = "auto".into();
+    }
+    if !matches!(settings.theme.as_str(), "auto" | "light" | "dark") {
+        settings.theme = "auto".into();
+    }
+    settings.exit_country = settings.exit_country.trim().to_ascii_lowercase();
+    if settings.exit_country.len() != 2
+        || !settings
+            .exit_country
+            .chars()
+            .all(|c| c.is_ascii_alphabetic())
+    {
+        settings.exit_country.clear();
+    }
+    let strat = settings.last_connect_strategy.as_str();
+    if strat != "direct"
+        && strat != "bridges"
+        && !strat.starts_with("bridges:")
+        && !strat.starts_with("builtin:")
+    {
+        settings.last_connect_strategy = "direct".into();
+    }
+    let src = settings.bridge_source.trim().to_ascii_lowercase();
+    settings.bridge_source = if src == "custom"
+        || src == "auto"
+        || src == "none"
+        || src.starts_with("transport:")
+        || src.starts_with("builtin:")
+    {
+        src
+    } else {
+        "none".into()
+    };
+    // None = do not load bridges into torrc / Smart Connect.
+    if settings.bridge_source == "none" {
+        settings.bridges_enabled = false;
+    }
+    if !matches!(settings.connection_mode.as_str(), "proxy" | "tun") {
+        settings.connection_mode = "proxy".into();
+    }
+    if !matches!(settings.app_routing_policy.as_str(), "only" | "except") {
+        settings.app_routing_policy = "only".into();
+    }
+    if settings.route_apps.is_empty() && !settings.split_tunnel_apps.is_empty() {
+        settings.route_apps = settings
+            .split_tunnel_apps
+            .iter()
+            .map(|name| AppIdentity {
+                id: format!("legacy:{name}"),
+                label: name.clone(),
+                process_name: name.clone(),
+                ..AppIdentity::default()
+            })
+            .collect();
+    }
+    settings.route_apps.retain(|app| {
+        !app.id.trim().is_empty()
+            && (!app.process_name.trim().is_empty() || !app.executable_path.trim().is_empty())
+    });
+    settings.route_apps.sort_by(|a, b| a.id.cmp(&b.id));
+    settings.route_apps.dedup_by(|a, b| a.id == b.id);
+    settings.split_tunnel_apps = settings
+        .route_apps
+        .iter()
+        .map(|app| app.process_name.clone())
+        .filter(|name| !name.is_empty())
+        .collect();
+    let mut dedup = Vec::new();
+    for line in settings.bridge_lines.drain(..) {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with('#') {
+            continue;
+        }
+        let normalized = if t.to_ascii_lowercase().starts_with("bridge ") {
+            format!("Bridge {}", t[7..].trim())
+        } else {
+            format!("Bridge {t}")
+        };
+        if !dedup.contains(&normalized) {
+            dedup.push(normalized);
+        }
+    }
+    settings.bridge_lines = dedup;
+}
+
+pub fn update(mutator: impl FnOnce(&mut AppSettings)) -> Result<AppSettings, String> {
+    let mut settings = load();
+    mutator(&mut settings);
+    normalize(&mut settings);
+    save(&settings)?;
+    Ok(settings)
+}
+
+pub fn set_remote_dns(enabled: bool) -> Result<AppSettings, String> {
+    update(|s| s.remote_dns = enabled)
+}

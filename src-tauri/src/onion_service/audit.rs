@@ -1,0 +1,135 @@
+use std::net::{SocketAddr, TcpStream};
+use std::process::Command;
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+
+use super::OnionProject;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListenerAudit {
+    pub reachable: bool,
+    pub loopback_only: bool,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OnionAudit {
+    pub listener: ListenerAudit,
+    pub published: bool,
+    pub latency_ms: Option<u64>,
+    pub http_status: Option<u16>,
+    pub security_headers: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+pub fn inspect_listener(port: u16) -> ListenerAudit {
+    let reachable = TcpStream::connect_timeout(
+        &SocketAddr::from(([127, 0, 0, 1], port)),
+        Duration::from_millis(500),
+    )
+    .is_ok();
+    if !reachable {
+        return ListenerAudit {
+            reachable: false,
+            loopback_only: false,
+            detail: format!("Nothing is accepting TCP connections on 127.0.0.1:{port}"),
+        };
+    }
+
+    #[cfg(target_os = "macos")]
+    let output = Command::new("lsof")
+        .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN"])
+        .output();
+    #[cfg(target_os = "linux")]
+    let output = Command::new("ss")
+        .args(["-ltn", &format!("sport = :{port}")])
+        .output();
+    #[cfg(target_os = "windows")]
+    let output = Command::new("netstat.exe")
+        .args(["-ano", "-p", "tcp"])
+        .output();
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    let output: std::io::Result<std::process::Output> = Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "listener inspection unsupported",
+    ));
+
+    let Ok(output) = output else {
+        return ListenerAudit {
+            reachable: true,
+            loopback_only: false,
+            detail: "Listener is reachable, but its bind address could not be inspected".into(),
+        };
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let wildcard = text.lines().any(|line| {
+        line.contains(&format!("*:{port}"))
+            || line.contains(&format!("0.0.0.0:{port}"))
+            || line.contains(&format!("[::]:{port}"))
+            || line.contains(&format!(":::{port}"))
+    });
+    ListenerAudit {
+        reachable: true,
+        loopback_only: !wildcard,
+        detail: if wildcard {
+            "Listener is exposed on a wildcard interface; bind it to 127.0.0.1 first".into()
+        } else {
+            format!("Listener appears restricted to loopback on port {port}")
+        },
+    }
+}
+
+pub async fn audit(project: &OnionProject) -> Result<OnionAudit, String> {
+    if let Some(credential) = &project.client_credential {
+        super::control::authorize_client(&project.service_id, credential).await?;
+    }
+    let connectivity =
+        crate::tor::onion::test_connectivity(&project.hostname, project.virtual_port).await?;
+    let mut warnings = Vec::new();
+    let mut status = None;
+    let mut security_headers = Vec::new();
+    if connectivity.reachable {
+        let proxy = reqwest::Proxy::all(format!(
+            "socks5h://{}:{}",
+            crate::tor::SOCKS_HOST,
+            crate::tor::SOCKS_PORT
+        ))
+        .map_err(|e| e.to_string())?;
+        let client = reqwest::Client::builder()
+            .proxy(proxy)
+            .timeout(Duration::from_secs(20))
+            .build()
+            .map_err(|e| e.to_string())?;
+        if let Ok(response) = client
+            .get(format!("http://{}", project.hostname))
+            .send()
+            .await
+        {
+            status = Some(response.status().as_u16());
+            for header in [
+                "content-security-policy",
+                "x-content-type-options",
+                "referrer-policy",
+                "permissions-policy",
+            ] {
+                if response.headers().contains_key(header) {
+                    security_headers.push(header.into());
+                }
+            }
+            if security_headers.is_empty() {
+                warnings.push("No common HTTP security headers were observed".into());
+            }
+        }
+    } else {
+        warnings.push("Onion descriptor may still be publishing; retry shortly".into());
+    }
+    Ok(OnionAudit {
+        listener: inspect_listener(project.local_port),
+        published: connectivity.reachable,
+        latency_ms: connectivity.latency_ms,
+        http_status: status,
+        security_headers,
+        warnings,
+    })
+}

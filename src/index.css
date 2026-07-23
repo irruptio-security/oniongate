@@ -1,0 +1,131 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Sora", "IBM Plex Sans", ui-sans-serif, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* Soft lavender canvas · Tor purple · status green */
+  --color-canvas: #f0ebf5;
+  --color-panel: #faf7fc;
+  --color-panel-2: #ebe3f3;
+  --color-line: #d8cce6;
+  --color-ink: #1a1228;
+  --color-muted: #6a5f7a;
+  --color-accent: #2db87a;
+  --color-accent-dim: #239663;
+  --color-on-accent: #ffffff;
+  --color-onion: #7d4698;
+  --color-onion-hot: #9b5bb5;
+  --color-danger: #d64545;
+  --color-warn: #c9892a;
+
+  /* Higher-contrast status text for use on the /15 tinted chip backgrounds
+     (the base accent/warn/danger hues are too light there for WCAG AA). */
+  --color-accent-strong: #0f7a4a;
+  --color-warn-strong: #8a5512;
+  --color-danger-strong: #a52020;
+  --color-onion-strong: #6a3a84;
+}
+
+/* Dark theme: overrides the same tokens so every `bg-*`/`text-*` utility flips
+   when the `.dark` class is present on <html>. Toggled from the theme setting
+   (auto/light/dark) in the app. */
+.dark {
+  --color-canvas: #14101c;
+  --color-panel: #1c1626;
+  --color-panel-2: #271e34;
+  --color-line: #352a47;
+  --color-ink: #ece7f4;
+  --color-muted: #a99fbb;
+  --color-accent: #34c98a;
+  --color-accent-dim: #2aa574;
+  --color-on-accent: #08130d;
+  --color-onion: #b06fca;
+  --color-onion-hot: #c188d8;
+  --color-danger: #e07070;
+  --color-warn: #d79a3e;
+
+  /* On dark panels the /15 tint sits over a dark background, so status text
+     must be light/bright to stay legible. */
+  --color-accent-strong: #52d19a;
+  --color-warn-strong: #e0b25f;
+  --color-danger-strong: #ef8f8f;
+  --color-onion-strong: #cf98e2;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    margin: 0;
+    min-height: 100%;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    color: var(--color-ink);
+    /* Even wash — avoids a hard white titlebar vs purple seam */
+    background:
+      radial-gradient(
+        140% 90% at 12% 0%,
+        rgba(125, 70, 152, 0.14) 0%,
+        transparent 58%
+      ),
+      radial-gradient(
+        110% 80% at 100% 100%,
+        rgba(45, 184, 122, 0.09) 0%,
+        transparent 55%
+      ),
+      linear-gradient(180deg, #f0ebf5 0%, #f5f1f8 45%, #f0ebf5 100%);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  .dark body {
+    background:
+      radial-gradient(
+        140% 90% at 12% 0%,
+        rgba(155, 91, 181, 0.2) 0%,
+        transparent 58%
+      ),
+      radial-gradient(
+        110% 80% at 100% 100%,
+        rgba(45, 184, 122, 0.12) 0%,
+        transparent 55%
+      ),
+      linear-gradient(180deg, #14101c 0%, #181322 45%, #14101c 100%);
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

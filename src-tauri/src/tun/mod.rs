@@ -1,0 +1,577 @@
+use std::fs;
+use std::path::PathBuf;
+use std::process::Stdio;
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+use tokio::process::{Child, Command};
+
+use crate::deps;
+use crate::tor::process::ISOLATED_SOCKS_PORT;
+use crate::tor::{DNS_PORT, SOCKS_HOST};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TunStatus {
+    pub supported: bool,
+    pub running: bool,
+    pub singbox_available: bool,
+    pub singbox_path: Option<String>,
+    pub config_path: Option<String>,
+    pub detail: String,
+}
+
+fn app_dir() -> Result<PathBuf, String> {
+    crate::tor::process::ensure_data_dir()
+}
+
+pub fn config_path() -> Result<PathBuf, String> {
+    Ok(app_dir()?.join("sing-box-tun.json"))
+}
+
+pub fn log_path() -> Result<PathBuf, String> {
+    Ok(app_dir()?.join("sing-box.log"))
+}
+
+fn dns_server(remote_dns: bool) -> (serde_json::Value, &'static str) {
+    if remote_dns {
+        (
+            serde_json::json!({
+                "tag": "tor-dns",
+                "address": format!("udp://{SOCKS_HOST}:{DNS_PORT}"),
+                "detour": "direct"
+            }),
+            "tor-dns",
+        )
+    } else {
+        (
+            serde_json::json!({
+                "tag": "system-dns",
+                "address": "local",
+                "detour": "direct"
+            }),
+            "system-dns",
+        )
+    }
+}
+
+/// Generate sing-box TUN → Tor SOCKS config (UDP/QUIC blocked).
+pub fn write_config() -> Result<PathBuf, String> {
+    let path = config_path()?;
+    let settings = crate::settings::load();
+    let (dns_server, dns_tag) = dns_server(settings.remote_dns);
+
+    let mut rules = vec![
+        serde_json::json!({ "protocol": "quic", "outbound": "block" }),
+        serde_json::json!({ "network": "udp", "port": 443, "outbound": "block" }),
+        serde_json::json!({ "network": "udp", "outbound": "block" }),
+        serde_json::json!({ "ip_is_private": true, "outbound": "direct" }),
+    ];
+
+    let mut outbounds = vec![
+        serde_json::json!({
+            "type": "socks",
+            "tag": "tor-socks",
+            "server": SOCKS_HOST,
+            "server_port": ISOLATED_SOCKS_PORT,
+            "version": "5",
+            "username": "oniongate-default",
+            "password": settings.circuit_epoch.to_string()
+        }),
+        serde_json::json!({ "type": "block", "tag": "block" }),
+        serde_json::json!({ "type": "direct", "tag": "direct" }),
+    ];
+
+    let final_outbound = if settings.split_tunnel && !settings.route_apps.is_empty() {
+        for (index, app) in settings.route_apps.iter().enumerate() {
+            let tag = format!("tor-app-{index}");
+            if settings.app_routing_policy == "only" {
+                outbounds.push(serde_json::json!({
+                    "type": "socks",
+                    "tag": tag,
+                    "server": SOCKS_HOST,
+                    "server_port": ISOLATED_SOCKS_PORT,
+                    "version": "5",
+                    "username": format!("oniongate-{index}"),
+                    "password": app.circuit_epoch.to_string()
+                }));
+            }
+            let outbound = if settings.app_routing_policy == "only" {
+                tag
+            } else {
+                "direct".into()
+            };
+            let mut rule = serde_json::json!({ "outbound": outbound });
+            if !app.executable_path.is_empty() {
+                rule["process_path"] = serde_json::json!([app.executable_path]);
+            } else {
+                rule["process_name"] = serde_json::json!([app.process_name]);
+            }
+            rules.insert(0, rule);
+        }
+        if settings.app_routing_policy == "only" {
+            "direct"
+        } else {
+            "tor-socks"
+        }
+    } else {
+        "tor-socks"
+    };
+
+    let config = serde_json::json!({
+        "log": {
+            "level": "info",
+            "output": log_path()?.display().to_string(),
+            "timestamp": true
+        },
+        "dns": {
+            "servers": [dns_server],
+            "final": dns_tag,
+            "strategy": "prefer_ipv4"
+        },
+        "inbounds": [{
+            "type": "tun",
+            "tag": "tun-in",
+            "interface_name": "torsocks0",
+            "address": ["172.19.0.1/30"],
+            "mtu": 1500,
+            "auto_route": true,
+            "strict_route": true,
+            "stack": "system",
+            "sniff": true
+        }],
+        "outbounds": outbounds,
+        "route": {
+            "rules": rules,
+            "final": final_outbound,
+            "auto_detect_interface": true
+        }
+    });
+    let raw = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize sing-box config: {e}"))?;
+    fs::write(&path, raw).map_err(|e| format!("Failed to write sing-box config: {e}"))?;
+    Ok(path)
+}
+
+pub fn process_seems_running() -> bool {
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        return std::process::Command::new("pgrep")
+            .args(["-f", "sing-box run -c"])
+            .output()
+            .map(|o| o.status.success() && !o.stdout.is_empty())
+            .unwrap_or(false);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return std::process::Command::new("tasklist.exe")
+            .args(["/FI", "IMAGENAME eq sing-box.exe", "/NH"])
+            .output()
+            .map(|output| {
+                output.status.success()
+                    && String::from_utf8_lossy(&output.stdout).contains("sing-box.exe")
+            })
+            .unwrap_or(false);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        false
+    }
+}
+
+/// Best-effort: TUN interface exists (macOS/Linux).
+fn tun_iface_present() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        // Preferred name from config; also accept any utun if sing-box is up.
+        if std::process::Command::new("ifconfig")
+            .arg("torsocks0")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+        {
+            return true;
+        }
+        // sing-box on macOS often binds utun*; presence + process is enough.
+        return process_seems_running();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        PathBuf::from("/sys/class/net/torsocks0").exists() || process_seems_running()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let output = std::process::Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Get-NetAdapter -InterfaceAlias torsocks0 -ErrorAction SilentlyContinue",
+            ])
+            .output();
+        output
+            .map(|result| result.status.success() && !result.stdout.is_empty())
+            .unwrap_or(false)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        false
+    }
+}
+
+async fn wait_until_running(timeout_ms: u64) -> bool {
+    let steps = (timeout_ms / 200).max(1);
+    for _ in 0..steps {
+        if process_seems_running() && tun_iface_present() {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    process_seems_running()
+}
+
+fn last_log_tail() -> String {
+    let Ok(path) = log_path() else {
+        return String::new();
+    };
+    let Ok(raw) = fs::read_to_string(path) else {
+        return String::new();
+    };
+    raw.lines()
+        .rev()
+        .take(8)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
+pub fn status(child: &Option<Child>) -> TunStatus {
+    let sing = deps::find_singbox();
+    let managed_alive = child.as_ref().and_then(|c| c.id()).is_some();
+    let running = managed_alive || process_seems_running();
+    let supported = cfg!(any(
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "windows"
+    ));
+    TunStatus {
+        supported,
+        running,
+        singbox_available: sing.is_some(),
+        singbox_path: sing.as_ref().map(|p| p.display().to_string()),
+        config_path: config_path().ok().map(|p| p.display().to_string()),
+        detail: if !supported {
+            "TUN mode is not supported on this OS yet".into()
+        } else if sing.is_none() {
+            deps::deps_status()
+                .into_iter()
+                .next()
+                .map(|d| d.hint)
+                .unwrap_or_else(|| "sing-box not found".into())
+        } else if running {
+            "TUN active (system traffic via sing-box → Tor SOCKS)".into()
+        } else {
+            "TUN idle — administrator approval required to start".into()
+        },
+    }
+}
+
+/// Start sing-box TUN. Requires root/admin; denial or failure does not soft-succeed.
+pub async fn start(managed: &mut Option<Child>) -> Result<String, String> {
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        let _ = managed;
+        return Err("TUN mode is only available on macOS and Linux".into());
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+    {
+        if process_seems_running() {
+            return Ok("TUN (sing-box) already running".into());
+        }
+
+        let sing = deps::find_singbox().ok_or_else(|| {
+            let hint = deps::deps_status()
+                .into_iter()
+                .next()
+                .map(|d| d.hint)
+                .unwrap_or_default();
+            format!("sing-box not found. {hint}")
+        })?;
+        let cfg = write_config()?;
+        let log = log_path()?;
+        // Truncate old log so we can spot fresh failures.
+        let _ = fs::write(&log, "");
+
+        crate::logs::append(format!("Starting sing-box TUN with {}", cfg.display()));
+
+        // TUN requires privileges. Do NOT fall back to an unelevated spawn —
+        // that can leave a process running without a real tunnel and look "connected".
+        start_elevated(&sing, &cfg, &log).await?;
+        *managed = None;
+
+        if !wait_until_running(4000).await {
+            let tail = last_log_tail();
+            let hint = if tail.is_empty() {
+                String::new()
+            } else {
+                format!(" Log: {tail}")
+            };
+            return Err(format!(
+                "Administrator approval was denied or sing-box failed to create the TUN. Stay on Proxy mode, or approve the admin prompt and try again.{hint}"
+            ));
+        }
+
+        Ok("TUN started with administrator privileges (sing-box → Tor SOCKS)".into())
+    }
+}
+
+#[cfg(target_os = "macos")]
+async fn start_elevated(
+    sing: &std::path::Path,
+    cfg: &std::path::Path,
+    log: &std::path::Path,
+) -> Result<String, String> {
+    let shell = format!(
+        "{} run -c {} >>{} 2>&1 & echo $!",
+        shell_escape(&sing.display().to_string()),
+        shell_escape(&cfg.display().to_string()),
+        shell_escape(&log.display().to_string())
+    );
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(format!(
+            "do shell script \"{}\" with administrator privileges",
+            shell.replace('\\', "\\\\").replace('"', "\\\"")
+        ))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+    if output.status.success() {
+        Ok("Elevated sing-box launch accepted".into())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let msg = stderr.trim();
+        if msg.contains("User canceled") || msg.contains("-128") {
+            Err("Administrator permission denied — TUN was not started".into())
+        } else if msg.is_empty() {
+            Err("Administrator launch failed or was cancelled — TUN was not started".into())
+        } else {
+            Err(format!("Administrator launch failed: {msg}"))
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn start_elevated(
+    sing: &std::path::Path,
+    cfg: &std::path::Path,
+    log: &std::path::Path,
+) -> Result<String, String> {
+    let bg = format!(
+        "{} run -c {} >>{} 2>&1 &",
+        shell_escape(&sing.display().to_string()),
+        shell_escape(&cfg.display().to_string()),
+        shell_escape(&log.display().to_string())
+    );
+    if which::which("pkexec").is_ok() {
+        let output = Command::new("pkexec")
+            .args(["sh", "-c", &bg])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|e| e.to_string())?;
+        if output.status.success() {
+            return Ok("Elevated sing-box launch accepted".into());
+        }
+        return Err(
+            "Administrator permission denied or pkexec failed — TUN was not started".into(),
+        );
+    }
+    let output = Command::new("sudo")
+        .args(["-n", "sh", "-c", &bg])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+    if output.status.success() {
+        Ok("Elevated sing-box launch accepted".into())
+    } else {
+        Err("Need admin rights for TUN (pkexec or passwordless sudo). Permission denied — TUN was not started".into())
+    }
+}
+
+#[cfg(target_os = "windows")]
+async fn start_elevated(
+    sing: &std::path::Path,
+    cfg: &std::path::Path,
+    _log: &std::path::Path,
+) -> Result<String, String> {
+    let sing = sing.display().to_string().replace('\'', "''");
+    let cfg = cfg.display().to_string().replace('\'', "''");
+    let script = format!(
+        "Start-Process -FilePath '{sing}' -Verb RunAs -WindowStyle Hidden -ArgumentList 'run','-c','{cfg}'"
+    );
+    let status = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .map_err(|e| e.to_string())?;
+    status
+        .success()
+        .then_some("Elevated sing-box launch accepted".into())
+        .ok_or_else(|| "Administrator permission denied — TUN was not started".into())
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn shell_escape(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+pub async fn stop(managed: &mut Option<Child>) -> Result<String, String> {
+    if let Some(mut child) = managed.take() {
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+        crate::logs::append("Stopped managed sing-box process");
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        let _ = Command::new("pkill")
+            .args(["-f", "sing-box run -c"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await;
+        tokio::time::sleep(Duration::from_millis(350)).await;
+
+        // Root-owned sing-box (from admin start) may ignore user pkill.
+        if process_seems_running() {
+            stop_elevated().await?;
+            tokio::time::sleep(Duration::from_millis(350)).await;
+        }
+
+        if process_seems_running() {
+            return Err(
+                "sing-box is still running (likely needs admin to kill). Approve the prompt or run: sudo pkill -f 'sing-box run -c'"
+                    .into(),
+            );
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("taskkill.exe")
+            .args(["/IM", "sing-box.exe", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await;
+        tokio::time::sleep(Duration::from_millis(350)).await;
+        if process_seems_running() {
+            stop_elevated().await?;
+            tokio::time::sleep(Duration::from_millis(350)).await;
+        }
+        if process_seems_running() {
+            return Err("sing-box.exe is still running after elevated Taskkill".into());
+        }
+    }
+
+    Ok("Stopped TUN / sing-box".into())
+}
+
+#[cfg(target_os = "macos")]
+async fn stop_elevated() -> Result<(), String> {
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg("do shell script \"pkill -f 'sing-box run -c' || true\" with administrator privileges")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("User canceled") || stderr.contains("-128") {
+            Err("Administrator permission denied while stopping TUN".into())
+        } else {
+            Err("Failed to stop elevated sing-box".into())
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+async fn stop_elevated() -> Result<(), String> {
+    let script =
+        "Start-Process taskkill.exe -Verb RunAs -Wait -ArgumentList '/IM','sing-box.exe','/F'";
+    let status = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .map_err(|e| e.to_string())?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| "Administrator permission denied while stopping TUN".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tor_dns_uses_the_udp_dnsport() {
+        let (server, tag) = dns_server(true);
+        assert_eq!(tag, "tor-dns");
+        assert_eq!(server["address"], "udp://127.0.0.1:9053");
+    }
+
+    #[test]
+    fn disabled_remote_dns_uses_system_resolver() {
+        let (server, tag) = dns_server(false);
+        assert_eq!(tag, "system-dns");
+        assert_eq!(server["address"], "local");
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn stop_elevated() -> Result<(), String> {
+    let script = "pkill -f 'sing-box run -c' || true";
+    if which::which("pkexec").is_ok() {
+        let status = Command::new("pkexec")
+            .args(["sh", "-c", script])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .map_err(|e| e.to_string())?;
+        if status.success() {
+            return Ok(());
+        }
+        return Err("pkexec failed while stopping TUN".into());
+    }
+    let status = Command::new("sudo")
+        .args(["-n", "sh", "-c", script])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Need admin rights to stop root-owned sing-box".into())
+    }
+}
