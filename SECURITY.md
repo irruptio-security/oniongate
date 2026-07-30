@@ -34,5 +34,13 @@ within 7 days, and coordinate publication after a fix is available.
   they do not sandbox that service.
 - Host hardening is optional and does not replace macOS, Linux, or Windows
   security updates.
+- The Verify report inspects egress and live configuration/state; it is not a
+  packet capture or proof that every application followed policy.
+- Windows remains experimental and does not implement Session Guard process
+  suspension.
+- The optional root helper currently accepts only typed kill-switch operations,
+  but its packaging and client-authentication hardening remain pre-stable.
 
-See [THREAT_MODEL.md](THREAT_MODEL.md) for the detailed model.
+See the [threat model](docs/reference/threat-model.md) for the detailed model,
+the [platform matrix](docs/reference/platform-support.md), and the
+[data/network inventory](docs/reference/data-and-network.md).

@@ -14,6 +14,12 @@ fn db_path() -> Result<PathBuf, String> {
         .ok_or_else(|| "Could not resolve local data directory".to_string())?
         .join("tor-socks-gui");
     std::fs::create_dir_all(&base).map_err(|e| format!("Failed to create data dir: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("Failed to protect data dir: {e}"))?;
+    }
     Ok(base.join("session.db"))
 }
 
@@ -27,6 +33,12 @@ fn now_unix() -> i64 {
 pub fn init() -> Result<(), String> {
     let path = db_path()?;
     let conn = Connection::open(&path).map_err(|e| format!("SQLite open failed: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("Failed to protect SQLite database: {e}"))?;
+    }
     conn.execute_batch(
         r#"
         PRAGMA journal_mode=WAL;

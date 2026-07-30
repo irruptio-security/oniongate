@@ -158,8 +158,18 @@ fn format_location(geo: &IpWhoResponse) -> Option<GeoLocation> {
     })
 }
 
-async fn lookup_location(ip: &str) -> Result<GeoLocation, String> {
-    let client = direct_client()?;
+async fn lookup_location(ip: &str, via_tor: bool) -> Result<GeoLocation, String> {
+    let client = if via_tor {
+        let proxy = reqwest::Proxy::all(format!("socks5h://{SOCKS_HOST}:{SOCKS_PORT}"))
+            .map_err(|e| format!("Invalid SOCKS proxy: {e}"))?;
+        reqwest::Client::builder()
+            .proxy(proxy)
+            .timeout(Duration::from_secs(20))
+            .build()
+            .map_err(|e| e.to_string())?
+    } else {
+        direct_client()?
+    };
     let url = format!("https://ipwho.is/{ip}");
     let resp = client
         .get(&url)
@@ -184,13 +194,16 @@ async fn enrich(report: IpReport) -> IpReport {
     let (direct_location, tor_location) = tokio::join!(
         async {
             match &report.direct_ip {
-                Some(ip) => lookup_location(ip).await.ok(),
+                Some(ip) => lookup_location(ip, false).await.ok(),
                 None => None,
             }
         },
         async {
             match &report.tor_ip {
-                Some(ip) => lookup_location(ip).await.ok(),
+                // Keep the Tor-exit lookup on the Tor path. Sending both
+                // addresses from the direct connection would let the
+                // geolocation provider correlate them.
+                Some(ip) => lookup_location(ip, true).await.ok(),
                 None => None,
             }
         }

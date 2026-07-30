@@ -41,15 +41,41 @@ mod unix_daemon {
 
     use tor_socks_gui_lib::helper::{decode, encode, HelperRequest, HelperResponse, SOCKET_PATH};
 
+    #[cfg(target_os = "macos")]
     extern "C" {
         fn getpeereid(fd: i32, euid: *mut u32, egid: *mut u32) -> i32;
     }
 
+    #[cfg(target_os = "macos")]
     fn peer_uid(stream: &UnixStream) -> Option<u32> {
         let mut euid: u32 = u32::MAX;
         let mut egid: u32 = u32::MAX;
         let rc = unsafe { getpeereid(stream.as_raw_fd(), &mut euid, &mut egid) };
         (rc == 0).then_some(euid)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn peer_uid(stream: &UnixStream) -> Option<u32> {
+        let mut credentials = std::mem::MaybeUninit::<libc::ucred>::zeroed();
+        let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+        let rc = unsafe {
+            libc::getsockopt(
+                stream.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_PEERCRED,
+                credentials.as_mut_ptr().cast(),
+                &mut length,
+            )
+        };
+        if rc != 0 || length as usize != std::mem::size_of::<libc::ucred>() {
+            return None;
+        }
+        Some(unsafe { credentials.assume_init() }.uid)
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    fn peer_uid(_stream: &UnixStream) -> Option<u32> {
+        None
     }
 
     fn allowed_uid() -> Option<u32> {
@@ -143,9 +169,9 @@ mod executor {
     // Baked, fixed policy — never supplied by the client.
     const PF_RULES: &str = "\
 # OnionGate — UDP/QUIC leak protection
-block drop out quick proto udp from any to any
 pass out quick on lo0 proto udp all
 pass out quick proto udp to 127.0.0.1
+block drop out quick proto udp from any to any
 ";
 
     pub fn kill_switch_enable() -> HelperResponse {
@@ -178,6 +204,26 @@ pass out quick proto udp to 127.0.0.1
             Ok(s) if s.success() => HelperResponse::ok("Kill switch disabled"),
             Ok(s) => HelperResponse::err(format!("pfctl flush failed: {s}")),
             Err(e) => HelperResponse::err(format!("pfctl flush error: {e}")),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::PF_RULES;
+
+        #[test]
+        fn loopback_exceptions_precede_the_quick_udp_block() {
+            let block = PF_RULES
+                .lines()
+                .position(|line| line.starts_with("block drop"))
+                .unwrap();
+            for pass in PF_RULES
+                .lines()
+                .enumerate()
+                .filter_map(|(index, line)| line.starts_with("pass").then_some(index))
+            {
+                assert!(pass < block);
+            }
         }
     }
 }

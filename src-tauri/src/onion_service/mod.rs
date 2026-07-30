@@ -1,11 +1,24 @@
+//! Onion Host: publish a loopback listener as a v3 onion service.
+//!
+//! Two tiers, with deliberately different key handling:
+//!
+//! - **Temporary** sites are created over the control port with `DiscardPK`.
+//!   Tor throws the key away immediately, so the address can never be
+//!   recreated, and the site is destroyed when it is stopped, when Tor stops,
+//!   or when the app quits.
+//! - **Permanent** sites live in [`persistent`], where Tor owns the key inside
+//!   its own `HiddenServiceDir`. They survive restarts on purpose.
+
 pub mod audit;
 mod control;
+pub mod persistent;
 mod store;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+/// A temporary onion site. Its key does not exist anywhere after creation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OnionProject {
     pub service_id: String,
@@ -47,7 +60,7 @@ pub async fn start(
     };
     store::insert(project.clone())?;
     crate::logs::append(format!(
-        "Created ephemeral {} onion service for loopback port {}",
+        "Created temporary {} onion site for loopback port {}",
         if private { "private" } else { "public" },
         local_port
     ));
@@ -67,19 +80,52 @@ pub async fn stop(service_id: &str) -> Result<String, String> {
     control::delete(service_id).await?;
     store::remove(service_id);
     Ok(format!(
-        "Destroyed ephemeral onion service {}",
+        "Destroyed temporary onion site {}",
         project.hostname
     ))
 }
 
-pub async fn stop_all() {
+/// Destroy every **temporary** site.
+///
+/// Permanent sites are intentionally untouched: they live in torrc rather than
+/// the in-memory store, and surviving a session teardown is the whole point of
+/// them. Deleting a permanent site is an explicit user action.
+pub async fn stop_all_temporary() {
     for project in store::list() {
         let _ = stop(&project.service_id).await;
     }
 }
 
-pub async fn audit(service_id: &str) -> Result<audit::OnionAudit, String> {
+/// Audit a temporary site.
+pub async fn audit_temporary(service_id: &str) -> Result<audit::OnionAudit, String> {
     let project =
         store::get(service_id).ok_or_else(|| "Onion service is not active".to_string())?;
-    audit::audit(&project).await
+    audit::audit(&audit::AuditTarget {
+        service_id: &project.service_id,
+        hostname: &project.hostname,
+        local_port: project.local_port,
+        virtual_port: project.virtual_port,
+        client_credential: project.client_credential.as_deref(),
+        auth_required_without_credential: false,
+    })
+    .await
+}
+
+/// Audit a permanent site.
+pub async fn audit_permanent(id: &str) -> Result<audit::OnionAudit, String> {
+    let site = persistent::get(id).ok_or_else(|| "No permanent site with that id".to_string())?;
+    let hostname = site
+        .hostname
+        .clone()
+        .ok_or_else(|| "Tor has not published this site yet; try again shortly".to_string())?;
+    let service_id = hostname.trim_end_matches(".onion").to_string();
+    audit::audit(&audit::AuditTarget {
+        service_id: &service_id,
+        hostname: &hostname,
+        local_port: site.local_port,
+        virtual_port: site.virtual_port,
+        client_credential: None,
+        auth_required_without_credential: site.auth_enabled,
+    })
+    .await
 }

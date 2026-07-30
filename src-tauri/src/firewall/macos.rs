@@ -55,9 +55,9 @@ pub fn status() -> FirewallStatus {
 fn pf_rules() -> String {
     "\
 # Tor SOCKS GUI — UDP/QUIC leak protection
-block drop out quick proto udp from any to any
 pass out quick on lo0 proto udp all
 pass out quick proto udp to 127.0.0.1
+block drop out quick proto udp from any to any
 "
     .into()
 }
@@ -166,8 +166,16 @@ mod tests {
             .lines()
             .position(|l| l.starts_with("block drop"))
             .unwrap();
-        let pass = rules.lines().position(|l| l.starts_with("pass")).unwrap();
-        assert!(block < pass, "loopback passes must follow the block rule");
+        for pass in rules
+            .lines()
+            .enumerate()
+            .filter_map(|(index, line)| line.starts_with("pass").then_some(index))
+        {
+            assert!(
+                pass < block,
+                "loopback passes must precede the quick block rule"
+            );
+        }
     }
 
     /// These strings are interpolated into a root shell command.

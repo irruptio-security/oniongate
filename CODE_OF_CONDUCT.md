@@ -61,6 +61,9 @@ representative at an online or offline event.
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the project maintainers responsible for enforcement through a
 private [GitHub Security Advisory](https://github.com/irruptio-security/oniongate/security/advisories/new).
+Start the report title with **Code of Conduct**. This is currently the project's
+only private maintainer inbox; conduct reports are handled as community matters,
+not published as security vulnerabilities.
 All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the

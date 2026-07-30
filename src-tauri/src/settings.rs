@@ -125,7 +125,18 @@ fn settings_path() -> Result<PathBuf, String> {
         .ok_or_else(|| "Could not resolve local data directory".to_string())?
         .join("tor-socks-gui");
     fs::create_dir_all(&base).map_err(|e| format!("Failed to create data dir: {e}"))?;
-    Ok(base.join("settings.json"))
+    let path = base.join("settings.json");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&base, fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("Failed to protect data dir: {e}"))?;
+        if path.exists() {
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+                .map_err(|e| format!("Failed to protect settings: {e}"))?;
+        }
+    }
+    Ok(path)
 }
 
 pub fn load() -> AppSettings {
@@ -142,9 +153,21 @@ pub fn load() -> AppSettings {
 
 pub fn save(settings: &AppSettings) -> Result<(), String> {
     let path = settings_path()?;
+    let temp = path.with_extension("json.tmp");
     let raw = serde_json::to_string_pretty(settings)
         .map_err(|e| format!("Failed to serialize settings: {e}"))?;
-    fs::write(&path, raw).map_err(|e| format!("Failed to write settings: {e}"))
+    fs::write(&temp, raw).map_err(|e| format!("Failed to write settings: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&temp, fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("Failed to protect settings: {e}"))?;
+    }
+    #[cfg(windows)]
+    if path.exists() {
+        fs::remove_file(&path).map_err(|e| format!("Failed to replace settings: {e}"))?;
+    }
+    fs::rename(&temp, &path).map_err(|e| format!("Failed to commit settings: {e}"))
 }
 
 fn normalize(settings: &mut AppSettings) {

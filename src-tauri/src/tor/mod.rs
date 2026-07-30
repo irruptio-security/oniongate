@@ -15,4 +15,4 @@ pub use process::{
     SOCKS_HOST, SOCKS_PORT,
 };
 pub use pt::{pt_status_all, PtStatus};
-pub use smart_connect::{smart_connect, SmartConnectResult};
+pub use smart_connect::smart_connect;

@@ -1,0 +1,67 @@
+# Changelog
+
+All notable user-facing changes to OnionGate are documented here.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+OnionGate uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.2.0] - 2026-07-30
+
+### Added
+
+- Managed Tor connection with Smart Connect, trusted bridge transports, exit
+  selection, relay pinning, and live bootstrap/session status.
+- Proxy and sing-box TUN routing modes with Tor DNS, UDP/QUIC containment,
+  per-application circuit isolation, and macOS/Linux Session Guard.
+- Temporary and permanent Onion Host sites, named v3 client credentials,
+  authorization toggling, audits, QR handoff, and permanent-address lifecycle.
+- Headless `oniongate` CLI for managed Tor and permanent onion-site operations.
+- Live verification for Tor egress, DNSPort, IPv6 exposure, UDP/QUIC policy,
+  app-policy prerequisites, and interrupted-session recovery.
+- macOS Checkup, hardening controls, and startup-item baselines.
+- Optional typed privileged helper for fixed kill-switch operations.
+- Native menu-bar/system-tray controls on macOS, Linux, and Windows.
+- VitePress documentation site, platform matrix, threat model, privacy/data
+  inventory, release process, and GitHub Pages deployment.
+- Cursor-assisted release changelog preparation with enforced version and
+  changelog gates.
+- Draft GitHub distribution for macOS ARM64/Intel, Linux x86_64, and Windows
+  x86_64 with updater metadata, helper packaging, signed checksums, SBOMs, and
+  provenance.
+
+### Changed
+
+- Renamed Onion Lab to Onion Host and separated temporary from permanent sites.
+- Reorganized operating-system checks and hardening under System; application
+  preferences and logs now live under Settings.
+- Added dedicated transparent app icons and compact platform-specific tray
+  icons.
+- Updated the updater endpoint and public project metadata to
+  `irruptio-security/oniongate`.
+- Standardized release downloads as macOS DMGs containing the app, a Windows
+  NSIS setup EXE, and Linux AppImage/DEB/RPM packages.
+
+### Security
+
+- Protected status now requires the requested live proxy/TUN, DNS, control, and
+  firewall boundary; incomplete startup is shown as degraded or unverified.
+- Private permanent sites start with an unusable authorization lock so they are
+  never briefly public, and the last active client cannot be revoked implicitly.
+- Tor-exit location lookup travels through Tor rather than linking both address
+  lookups over the direct connection.
+- Local settings, logs, databases, journals, and onion-service state use
+  owner-only Unix permissions.
+- Corrected macOS `pf` rule ordering so loopback DNS remains available while
+  clearnet UDP is blocked.
+- Removed third-party Objective-See integration recommendations and the broad
+  frontend URL-opener permission.
+
+### Known limitations
+
+- There is no stable audited release yet; Windows and CLI protected-session
+  orchestration remain experimental.
+- The privileged helper still requires minimal-crate and client-identity
+  hardening before a stable release.
+- Linux AArch64 cannot bundle Tor until an official expert bundle is available.

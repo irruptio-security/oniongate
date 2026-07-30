@@ -289,8 +289,8 @@ export function SettingsPage({ app }: { app: TorApp }) {
             </div>
             <p className="mt-0.5 text-xs text-muted">{helper.detail}</p>
             <p className="mt-1 text-[11px] text-muted">
-              Install once (one prompt). Afterwards the kill switch, TUN, proxy, and
-              hardening apply without asking for your password again.
+              Install once (one prompt). The current typed helper handles only
+              OnionGate's kill-switch rule; TUN, proxy, and hardening may still prompt.
             </p>
           </div>
           {helper.installed ? (
@@ -332,7 +332,7 @@ export function SettingsPage({ app }: { app: TorApp }) {
           <div className="text-sm font-semibold">Administrator access</div>
           <p className="text-xs text-muted">
             {helper?.running
-              ? "The background helper is handling privileged actions, so this is not needed."
+              ? "The background helper handles the kill switch. TUN, proxy, and hardening may still need temporary administrator approval."
               : "Without the background helper, enabling the system proxy, TUN, kill switch, or hardening needs administrator approval. Grant it here (or during setup) so those actions apply without repeated prompts. macOS keeps this active for a few minutes."}
           </p>
         </div>

@@ -1,0 +1,127 @@
+# Verify the live boundary
+
+Connecting to Tor and *being protected* are different things. The Verify page
+checks the second one against the live state of your machine rather than against
+what OnionGate intended to configure.
+
+## What each check proves
+
+### Tor egress
+
+Makes an HTTPS request to the IP-check service through `socks5h` on managed Tor.
+A pass proves that a request succeeded through that SOCKS path at that moment.
+
+### Direct/Tor separation (Proxy) or Default/Tor egress (TUN)
+
+In Proxy mode, fetches one address without an application proxy and one through
+Tor, then compares them in memory. Matching addresses fail. If either path is
+unavailable, the result is a warning because separation could not be
+established.
+
+That direct baseline exists only in Proxy mode. In TUN mode, the operating
+system captures the no-proxy request too; bypassing TUN just to discover the
+clearnet address would weaken the boundary. The verifier therefore reports the
+comparison as **unverifiable** instead of failing when addresses match or
+claiming that different Tor circuits prove separation.
+
+Neither address is saved to the report or database. The IP-check providers still
+receive the requested network traffic; see
+[Local data and network activity](/reference/data-and-network).
+
+### Resolve through Tor
+
+When the setting is enabled, sends a small UDP DNS query to Tor's local DNSPort
+and requires a response. This proves the local DNSPort is live; it does not
+observe every application's DNS requests.
+
+When the setting is disabled, the verifier warns because it cannot establish
+DNS containment for proxy applications. In proxy mode, each application must
+use SOCKS hostname resolution (`socks5h`) itself.
+
+### UDP/QUIC containment
+
+Passes when TUN is live, or when OnionGate can inspect a live platform firewall
+rule that blocks UDP. A recovery marker without a verifiable live rule produces
+a warning.
+
+This is a live configuration/rule inspection, not an end-to-end packet probe.
+The kill switch does not block arbitrary direct TCP.
+
+### IPv6 route
+
+Checks whether the operating system has an IPv6 default route. A route is
+accepted only while TUN is live; no route also passes. A default route without
+TUN produces a warning.
+
+This does not send an IPv6 test packet or prove how every application binds its
+sockets.
+
+### Selected-app policy
+
+Checks that, when selected-app routing is enabled, at least one stable
+application identity exists and TUN is live. It does not inspect every packet
+or prove a currently running process matched its stored identity. Use the route
+status on **Apps** for that operational check.
+
+### Session Guard
+
+Passes only when Session Guard, selected-app routing, **Only selected via Tor**,
+and at least one selected identity are configured. This verifies the policy
+preconditions, not a forced route-loss event.
+
+### Crash recovery state
+
+Compares the recovery journal with live Tor, proxy, TUN, and firewall state. It
+fails when an interrupted session still has OnionGate-managed state requiring
+Emergency Restore.
+
+## Pass, warning, and failure
+
+- **Pass** — the specific condition above was observed.
+- **Warning** — the condition could not be established or an optional
+  fail-closed control is not configured.
+- **Failure** — a required live condition was absent or contradicted.
+
+The report's overall `passed` value means there were no **failures**. A report
+can pass while containing warnings. Read every row.
+
+## Reading the report
+
+A report is a snapshot, not a guarantee. It says what was true at that moment,
+on this machine, for the applications it could observe. It cannot tell you
+whether an application you never registered is leaking, and it cannot detect
+correlation by an adversary watching both ends of your connection.
+
+Exported reports are redacted: public IPs, bridge lines, local file paths, and
+full process command lines are excluded by design. See
+[Privacy](/reference/privacy) for the complete list of what is and is not stored.
+
+OnionGate retains the newest 20 reports locally in `session.db`. Export writes
+the latest report to the path you select, with
+`oniongate-verification.json` as the suggested filename.
+
+## Test a v3 onion service
+
+The separate onion test validates a 56-character v3 hostname, then sends a
+SOCKS5 domain-name request through Tor to port 80. A successful result proves
+the hostname was handed to Tor rather than local DNS and that Tor accepted the
+connection.
+
+It does not use a private site's client credential. Use Onion Host's audit for a
+temporary private site, or test a permanent private site from a Tor client that
+holds an issued credential.
+
+## When a check fails
+
+Fix the failure before treating the session as protected. On macOS/Linux, a
+matching selected application suspends rather than falling back when Session
+Guard's documented preconditions are active. That guarantee does not extend to
+unselected apps, unmatched child processes, Proxy mode, or Windows. A failing
+check means some part of the assumed boundary is not doing what you expected.
+
+If state looks stale after a crash or an interrupted disconnect, run **Emergency
+Restore** on the Connect page. Protected-session network state is journaled, so
+recovery replays the journal and puts proxy, TUN, and firewall state back.
+
+See [Recovery and troubleshooting](/guide/troubleshooting) for platform checks
+when cleanup cannot verify that state was removed.

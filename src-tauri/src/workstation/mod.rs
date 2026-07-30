@@ -35,16 +35,6 @@ pub struct PersistenceReport {
     pub removed_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HostTool {
-    pub id: String,
-    pub name: String,
-    pub installed: bool,
-    pub path: Option<String>,
-    pub official_url: String,
-    pub purpose: String,
-}
-
 /// Result of an explicit, user-initiated Background/Login Items scan.
 /// Separate from the routine persistence inventory because it requires Full
 /// Disk Access and triggers a TCC prompt.
@@ -92,17 +82,6 @@ pub fn save_persistence_baseline() -> Result<String, String> {
     #[cfg(not(target_os = "macos"))]
     {
         Err("Persistence baseline is currently implemented for macOS".into())
-    }
-}
-
-pub fn host_tools() -> Vec<HostTool> {
-    #[cfg(target_os = "macos")]
-    {
-        macos::host_tools()
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Vec::new()
     }
 }
 

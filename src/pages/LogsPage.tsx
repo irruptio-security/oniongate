@@ -7,7 +7,7 @@ import type { TorApp } from "@/hooks/useTorApp";
 export function LogsPage({ app }: { app: TorApp }) {
   const { logs, busy, run, refreshLogs } = app;
 
-  // Logs is a System sub-view now; poll while this page is mounted.
+  // Logs is a Settings sub-view; poll while this page is mounted.
   useEffect(() => {
     void refreshLogs();
     const id = window.setInterval(() => void refreshLogs(), 2000);

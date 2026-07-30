@@ -7,6 +7,12 @@ import { HomePage } from "@/pages/HomePage";
 import { NetworkPage } from "@/pages/NetworkPage";
 import { ScannerPage } from "@/pages/ScannerPage";
 
+function bridgeSourceLabel(source: string): string {
+  if (source === "builtin:snowflake") return "Snowflake fallback";
+  if (source.startsWith("transport:")) return source.slice("transport:".length);
+  return source;
+}
+
 export function ConnectPage({ app }: { app: TorApp }) {
   const [view, setView] = useState<"connect" | "network" | "bridges">("connect");
   const settings = app.settings;
@@ -21,7 +27,7 @@ export function ConnectPage({ app }: { app: TorApp }) {
         settings.remote_dns ? "via Tor" : "system"
       } · Kill switch ${settings.kill_switch ? "on" : "off"} · Session Guard ${
         settings.session_guard ? "on" : "off"
-      }${settings.bridge_source && settings.bridge_source !== "none" ? ` · Bridges ${settings.bridge_source}` : ""}`
+      }${settings.bridge_source && settings.bridge_source !== "none" ? ` · Bridges ${bridgeSourceLabel(settings.bridge_source)}` : ""}`
     : undefined;
 
   return (
@@ -40,8 +46,8 @@ export function ConnectPage({ app }: { app: TorApp }) {
           <button
             type="button"
             onClick={() => {
-              app.setSystemView("settings");
-              app.setTab("system");
+              app.setSettingsView("preferences");
+              app.setTab("settings");
             }}
             aria-label={`Preset: ${presetLabel}. Change in Settings.`}
             className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-panel-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
@@ -56,8 +62,8 @@ export function ConnectPage({ app }: { app: TorApp }) {
             action={{
               label: "Change preset in Settings",
               onClick: () => {
-                app.setSystemView("settings");
-                app.setTab("system");
+                app.setSettingsView("preferences");
+                app.setTab("settings");
               },
             }}
           />

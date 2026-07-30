@@ -34,9 +34,9 @@ export const PRESETS: { id: PresetId; label: string; description: string }[] = [
   },
   {
     id: "developer",
-    label: "Developer Lab",
+    label: "Developer",
     description:
-      "Proxy mode without a kill switch — convenient for local onion service development.",
+      "Proxy mode without a kill switch — convenient for local onion site development.",
   },
 ];
 

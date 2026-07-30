@@ -3,6 +3,10 @@
 Never paste credential values into issues, commits, pull requests, or chat.
 Configure them as GitHub Actions repository secrets.
 
+Changelog generation is intentionally manual through the project
+`release-changelog` Cursor skill. Release CI only validates the committed
+result, so no Cursor API key is stored in GitHub.
+
 ## Tauri updater
 
 The first release establishes the updater trust root. Back up the private key
@@ -68,28 +72,24 @@ unsigned experimental Windows artifact.
 
 ## Privileged helper (bundling + signing)
 
-OnionGate ships a privileged helper (`oniongate-helper`) so that, after a single
-install prompt, the kill switch, TUN, proxy, and hardening apply without
-re-prompting. The app resolves the helper next to its own executable, so the
-release build must place and sign it there. This is NOT wired into
-`tauri.conf.json` `externalBin` on purpose — doing so would break `npm run tauri
-dev`, which does not produce the helper in `binaries/`. In dev the helper is
-found at `target/debug/oniongate-helper` automatically.
+OnionGate includes a privileged-helper binary (`oniongate-helper`) so that,
+after a single install prompt, its current typed kill-switch operations can run
+without re-prompting. TUN, proxy, and hardening still use their normal elevation
+paths. The app resolves the helper next to its own executable. Normal
+development does not declare it as an `externalBin`; release CI builds the
+target-specific helper and applies `src-tauri/tauri.release.conf.json` only to
+distributable bundles. Tauri then signs the nested executable with the same
+configured platform identity as the application.
 
-Release steps (add to the release workflow, per target):
+Before publishing a draft, inspect the bundle:
 
-1. Build the helper: `cargo build --release --bin oniongate-helper`.
-2. Place it beside the app binary in the bundle:
-   - macOS: `Contents/MacOS/oniongate-helper`
-   - Linux: next to the AppImage/binary
-   - Windows: next to `OnionGate.exe`
-3. Sign it (macOS): with the **same Developer ID + Team ID** as the app and the
-   hardened runtime, e.g.
-   `codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" oniongate-helper`,
-   then sign/notarize the outer bundle. launchd matches the daemon to the app by
-   Team ID, so identities must match.
-4. Windows: sign `oniongate-helper.exe` with the same Authenticode certificate as
-   the app.
+1. macOS: `Contents/MacOS/oniongate-helper` exists and the outer app passes
+   `codesign --verify --deep --strict`. launchd expects the helper and app to
+   share the Team ID.
+2. Linux: the helper is included beside the packaged executable and retains its
+   executable mode.
+3. Windows: `oniongate-helper.exe` is present and has the same valid
+   Authenticode publisher as `OnionGate.exe`.
 
 Hardening follow-up: split the helper into a minimal crate so the root daemon
 does not carry the GUI dependency tree, and add client code-signature

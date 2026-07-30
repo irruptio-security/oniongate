@@ -31,7 +31,6 @@ use tauri::{Manager, WindowEvent};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -72,7 +71,6 @@ pub fn run() {
             commands::stop_tor,
             commands::get_recovery_status,
             commands::emergency_restore,
-            commands::smart_connect,
             commands::start_tun,
             commands::stop_tun,
             commands::set_kill_switch,
@@ -92,6 +90,14 @@ pub fn run() {
             commands::list_onion_services,
             commands::stop_onion_service,
             commands::audit_onion_service,
+            commands::list_permanent_sites,
+            commands::add_permanent_site,
+            commands::remove_permanent_site,
+            commands::rename_permanent_site,
+            commands::add_permanent_site_client,
+            commands::revoke_permanent_site_client,
+            commands::set_permanent_site_auth,
+            commands::audit_permanent_site,
             commands::save_bridge_library,
             commands::list_bridge_library,
             commands::get_session_overview,
@@ -136,7 +142,6 @@ pub fn run() {
             commands::get_workstation_posture,
             commands::get_persistence_report,
             commands::save_persistence_baseline,
-            commands::get_host_security_tools,
             commands::scan_login_items,
             commands::open_full_disk_access_settings,
         ])

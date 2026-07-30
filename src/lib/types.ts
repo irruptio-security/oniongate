@@ -1,13 +1,14 @@
-export type Tab =
-  | "home"
-  | "apps"
-  | "onion-lab"
-  | "verify"
-  | "harden"
-  | "system";
+export type Tab = "home" | "apps" | "host" | "verify" | "system" | "settings";
 
-/** Sub-views within the System tab (used for deep-linking from other pages). */
-export type SystemView = "audit" | "persistence" | "settings" | "logs";
+/**
+ * Sub-views within the System tab (used for deep-linking from other pages).
+ * System covers the machine: what its security state is, how to change it, and
+ * what runs on its own.
+ */
+export type SystemView = "checkup" | "harden" | "startup";
+
+/** Sub-views within the Settings tab, which covers OnionGate itself. */
+export type SettingsView = "preferences" | "logs";
 
 export type ProxyStatus = {
   supported: boolean;
@@ -47,6 +48,13 @@ export type DepStatus = {
   hint: string;
 };
 
+export type SessionPhase =
+  | "disconnected"
+  | "connecting"
+  | "protected"
+  | "degraded"
+  | "recovering";
+
 export type AppStatus = {
   tor_installed: boolean;
   tor_path: string | null;
@@ -72,6 +80,7 @@ export type AppStatus = {
   dns_port: number;
   install_hint: string;
   persistence_changes: number;
+  session_phase: SessionPhase;
 };
 
 export type GeoLocation = {
@@ -283,4 +292,55 @@ export type NetworkTestResult = {
   message: string;
   direct_ip: string | null;
   tor_ip: string | null;
+};
+
+/* Onion Host --------------------------------------------------------------- */
+
+/** A temporary site. Its key is discarded by Tor at creation. */
+export type OnionProject = {
+  service_id: string;
+  hostname: string;
+  local_port: number;
+  virtual_port: number;
+  private: boolean;
+  client_credential: string | null;
+  created_at_unix: number;
+};
+
+export type ListenerAudit = {
+  reachable: boolean;
+  loopback_only: boolean;
+  detail: string;
+};
+
+export type OnionAudit = {
+  listener: ListenerAudit;
+  published: boolean;
+  latency_ms: number | null;
+  http_status: number | null;
+  security_headers: string[];
+  warnings: string[];
+};
+
+/**
+ * A permanent site. `hostname` is read from Tor's public `hostname` file and is
+ * null until Tor has published the service.
+ */
+export type PermanentSite = {
+  id: string;
+  nickname: string;
+  local_port: number;
+  virtual_port: number;
+  created_at_unix: number;
+  hostname: string | null;
+  auth_enabled: boolean;
+  clients: string[];
+};
+
+/** Shown once at issue time; the private half is never stored. */
+export type IssuedCredential = {
+  site_id: string;
+  client_name: string;
+  credential: string;
+  auth_private_line: string | null;
 };

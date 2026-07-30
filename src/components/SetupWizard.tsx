@@ -36,7 +36,7 @@ export function SetupWizard({ app }: { app: TorApp }) {
     void app.run(async () => {
       await invoke<AppSettings>("set_setup_complete", { done: true });
       await app.refreshSettings();
-      return "Setup skipped — you can change everything later in Connect and System";
+      return "Setup skipped — you can change everything later in Connect, System, and Settings";
     });
 
   const grantAdmin = () =>
@@ -137,8 +137,8 @@ export function SetupWizard({ app }: { app: TorApp }) {
               </h2>
               <p className="text-sm text-muted">
                 OnionGate manages Tor, gives selected apps isolated circuits, lets you
-                expose localhost as a private onion service, and verifies you are not
-                leaking.
+                host localhost as a temporary or permanent onion site, and inspects the
+                live routing and leak-prevention boundary.
               </p>
               <p className="rounded-lg border border-line bg-canvas px-3 py-2 text-xs text-muted">
                 It is not a VPN, Tor Browser, or antivirus. For browser anonymity use Tor
@@ -150,8 +150,8 @@ export function SetupWizard({ app }: { app: TorApp }) {
           {step === 1 ? (
             <div className="space-y-2">
               <p className="text-sm text-muted">
-                Pick how you want to connect. You can switch presets later on the Connect
-                page.
+                Pick how you want to connect. You can switch presets later under
+                Settings.
               </p>
               <div className="space-y-1.5">
                 {PRESETS.map((item) => (
@@ -211,7 +211,7 @@ export function SetupWizard({ app }: { app: TorApp }) {
                     Optional: Full Disk Access
                   </div>
                   <p className="mt-0.5 text-[11px] text-muted">
-                    Only needed to scan Background/Login Items in System → Persistence.
+                    Only needed to scan Background/Login Items in System → Startup Items.
                     Grant it once; OnionGate never scans it automatically.
                   </p>
                   <Button
@@ -245,7 +245,7 @@ export function SetupWizard({ app }: { app: TorApp }) {
               </div>
               <p className="text-sm text-muted">
                 After connecting, open <span className="font-medium text-ink">Verify</span>{" "}
-                to confirm your traffic and DNS go through Tor.
+                to inspect egress, DNS, and the live protection controls.
               </p>
             </div>
           ) : null}

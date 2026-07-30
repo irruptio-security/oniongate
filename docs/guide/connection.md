@@ -1,0 +1,176 @@
+# Connect and route traffic
+
+The **Connect** tab has three views: the live connection dashboard,
+**Routing**, and **Bridges**. This page explains what each routing control
+changes and, equally important, what it does not protect.
+
+The preset chip beside those views summarizes the active settings. Select it (or
+its information action) to jump to **Settings → Preferences**.
+
+## Managed Tor
+
+OnionGate starts its own Tor process with loopback-only listeners:
+
+- SOCKS at `127.0.0.1:9050`;
+- isolated-auth SOCKS at `127.0.0.1:9060`;
+- control port at `127.0.0.1:9051`;
+- DNSPort at `127.0.0.1:9053` when remote DNS is enabled.
+
+If another Tor instance occupies SOCKS port 9050 without the required control
+port, OnionGate attempts to stop that instance and start the managed one. Do not
+run two Tor managers on these ports at the same time.
+
+The connection badge is based on live components, not just a saved preference:
+the recovery journal must be in `protected` phase, Tor SOCKS/control and any
+requested DNSPort must be reachable, and the selected proxy or TUN boundary must
+be live. If the kill switch is requested, its rule must also be visible to live
+inspection. Otherwise the badge says **Degraded** or **unverified** rather than
+protected.
+
+## Dashboard address and session counters
+
+**Current IP** shows the Tor-visible address when available, otherwise the
+default-path address, plus an approximate location. **Refresh IP** repeats those
+requests; the values remain in UI memory and are not saved to verification
+reports. See [Local data and network activity](/reference/data-and-network) for
+the providers and TUN behavior.
+
+The dashboard also shows current download/upload rates, total session bytes,
+observed circuit count, identity-change count, and uptime. These are local
+session counters, not destination history. The small rate graph is a compact
+status visualization rather than a retained traffic trace.
+
+## Smart Connect
+
+Smart Connect is designed for changing networks. It first tries direct Tor,
+then your saved bridge lines, then the bundled Snowflake transport. It records
+the gateway-derived network key, attempted strategies, and selection reason
+locally. It does not upload that network key.
+
+Turning Smart Connect off starts Tor with the currently saved bridge and routing
+configuration without trying alternatives.
+
+::: warning Snowflake is a fallback, not a faster Tor mode
+Use bridges when direct Tor is blocked or conspicuous on your network. A bridge
+operator or transport infrastructure can observe that your device connected to
+it, and constraining Tor's entry path may reduce anonymity.
+:::
+
+## Proxy mode
+
+Proxy mode optionally configures the operating system to advertise OnionGate's
+SOCKS listener.
+
+It is a compatibility mode, not forced containment:
+
+- an application can ignore the system proxy;
+- plain `socks5` may resolve DNS locally; use `socks5h` or the application's
+  equivalent “proxy DNS” setting;
+- UDP and QUIC do not travel through Tor;
+- software with its own networking stack may connect directly.
+
+Use the **Apps** page for known bypass-prone software, or use TUN when you need a
+stronger system routing boundary.
+
+The Connect dashboard's **System proxy: ON/OFF** button is a live shortcut for
+the operating-system SOCKS setting. It is disabled in TUN mode because TUN owns
+the routing boundary.
+
+On disconnect, OnionGate restores the proxy state it captured before enabling
+its own proxy. If no captured snapshot is available, it disables only its SOCKS
+configuration.
+
+## TUN mode
+
+TUN mode starts bundled sing-box with an automatically generated configuration.
+It captures system traffic, sends TCP through Tor SOCKS, and blocks all UDP,
+including QUIC. DNS is sent to Tor's local DNSPort when **Resolve through Tor**
+is on.
+
+The generated policy deliberately sends private-address traffic directly so
+local devices and services remain reachable. This includes destinations that
+sing-box identifies as private LAN addresses.
+
+::: warning TUN is not a VPN
+Traffic still exits through Tor, Tor still carries TCP only, and OnionGate does
+not provide Tor Browser's browser-state or fingerprinting defenses. TUN changes
+how applications reach Tor; it does not change Tor's anonymity model.
+:::
+
+Starting and stopping TUN requires administrator access. OnionGate does not
+silently fall back to an unelevated process if TUN creation fails. The UI stays
+in or returns to Proxy mode and reports the failure.
+
+## Resolve through Tor
+
+When enabled:
+
+- TUN sends DNS queries to Tor's local DNSPort;
+- proxy applications still need SOCKS hostname resolution (`socks5h`) because
+  OnionGate cannot force an application that performs its own DNS lookup.
+
+When disabled, OnionGate uses system DNS in TUN mode and cannot claim DNS
+containment for proxy applications. `.onion` names require Tor-side hostname
+resolution.
+
+## Kill switch
+
+The kill switch blocks clearnet UDP/QUIC using a platform firewall rule:
+
+- macOS: a dedicated `pf` anchor;
+- Linux: a dedicated `nftables` table;
+- Windows: a named Windows Defender Firewall rule.
+
+It does **not** block all direct TCP. TCP fail-closed behavior comes from TUN's
+`strict_route` and, for explicitly selected applications, Session Guard.
+Proxy-only applications that ignore SOCKS can still make direct TCP
+connections.
+
+When the setting is saved, Connect re-applies the firewall rule in either Proxy
+or TUN mode. A requested rule that fails prevents a Protected badge.
+
+OnionGate writes a local recovery marker and verifies the live firewall rule
+where the platform permits it. Disconnect and Emergency Restore remove only
+OnionGate's rule.
+
+If a requested kill-switch enable action fails during TUN startup, OnionGate
+leaves the journal degraded and reports an error. If the action succeeds but
+later live inspection is unavailable, the badge remains **unverified**. TUN may
+remain active to avoid dropping captured traffic onto a direct route; retry the
+kill switch or disconnect.
+
+## Exit country and relay pins
+
+An exit-country selection writes Tor's `ExitNodes` preference. It is a
+preference among available exits, not a guarantee that an exit will always be
+available.
+
+Relay search queries the Tor Project's Onionoo service by nickname, country, or
+fingerprint. Pinning an entry or exit constrains circuit selection. A smaller
+relay set is easier to fingerprint and correlate, so leave these controls
+automatic unless you have a specific operational reason.
+
+**Clear pins** removes entry, middle, and fingerprint-based exit pins. It does
+not clear the separate exit-country preference.
+
+## New identity
+
+**New identity** sends Tor's `NEWNYM` signal and increments the local identity
+counter. Existing long-lived connections may keep their old circuit, and remote
+accounts, cookies, browser state, and application identifiers do not change.
+It is not a “become anonymous again” button.
+
+## VPN warning
+
+OnionGate reports when another VPN appears active because competing route and
+DNS changes can invalidate its assumptions. It does not automatically disable
+the VPN. Disconnect it or verify the combined route carefully before relying on
+OnionGate. Automatic VPN detection is implemented on macOS and Linux, not
+Windows; see [Platform support](/reference/platform-support).
+
+## Related guides
+
+- [Use bridges](/guide/bridges)
+- [Route applications](/guide/apps)
+- [Verify the live boundary](/guide/verify)
+- [Threat model](/reference/threat-model)

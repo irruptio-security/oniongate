@@ -11,11 +11,14 @@
 
 ## Checklist
 
-- [ ] `npm run check` passes (typecheck + Rust tests)
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` pass
+- [ ] `make check` passes (typecheck + Rust tests)
+- [ ] `make lint` passes (`cargo clippy --all-targets` and `cargo fmt --check`)
+- [ ] `make docs-build` passes
+- [ ] User-visible behavior, platform limits, persisted data, network requests, CLI, and recovery docs are updated where affected
 - [ ] Network mutations stay behind a typed platform API with rollback + startup recovery
 - [ ] Added tests for torrc / control-protocol / routing / firewall / persistence changes
 - [ ] No secrets, onion keys, bridge lines, logs, or local reports committed
+- [ ] Onion key material is neither read, logged, nor exported (permanent sites stay owned by Tor)
 - [ ] Does not weaken Tor circuits or add a silent direct-route fallback
 - [ ] Attribution preserved and license compatibility verified for reused code
 

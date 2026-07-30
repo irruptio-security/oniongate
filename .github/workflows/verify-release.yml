@@ -1,0 +1,50 @@
+name: Verify Published Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  attestations: read
+
+jobs:
+  verify-latest:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Verify public updater manifest
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          url="https://github.com/$REPO/releases/latest/download/latest.json"
+          curl --fail --location --retry 10 --retry-delay 6 "$url" --output latest.json
+          jq -e '
+            .platforms
+            | has("darwin-aarch64")
+              and has("darwin-x86_64")
+              and has("linux-x86_64")
+              and has("windows-x86_64")
+          ' latest.json >/dev/null
+      - name: Download published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          mkdir release-assets
+          gh release download "$TAG" --dir release-assets
+      - name: Verify checksums
+        run: |
+          cd release-assets
+          sha256sum --check SHA256SUMS --ignore-missing
+      - name: Verify GitHub provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          for asset in release-assets/*; do
+            case "$asset" in
+              *.sig) continue ;;
+            esac
+            gh attestation verify "$asset" --repo "$REPO"
+          done

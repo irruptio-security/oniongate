@@ -11,6 +11,13 @@ node_modules
 dist
 dist-ssr
 *.local
+*.cdx.json
+release-assets/
+release-notes.md
+
+# VitePress documentation site build output
+docs/.vitepress/dist
+docs/.vitepress/cache
 
 # Bundled runtimes (fetched by scripts/download-deps.sh)
 .deps-cache/

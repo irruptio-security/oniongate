@@ -9,10 +9,15 @@ import type {
   FetchBridgesResult,
   HardenItem,
   IpReport,
+  IssuedCredential,
   NetworkTestResult,
   NewIdentityResult,
+  OnionAudit,
+  OnionProject,
+  PermanentSite,
   RelayInfo,
   SessionOverview,
+  SettingsView,
   ShellProxyStatus,
   SnowflakeStatus,
   SystemView,
@@ -22,7 +27,9 @@ import type {
 
 export function useTorApp() {
   const [tab, setTab] = useState<Tab>("home");
-  const [systemView, setSystemView] = useState<SystemView>("audit");
+  const [systemView, setSystemView] = useState<SystemView>("checkup");
+  const [settingsView, setSettingsView] = useState<SettingsView>("preferences");
+  const [hardenFocusId, setHardenFocusId] = useState<string | null>(null);
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [ips, setIps] = useState<IpReport | null>(null);
   const [detect, setDetect] = useState<DetectReport | null>(null);
@@ -45,6 +52,12 @@ export function useTorApp() {
   const [harden, setHarden] = useState<HardenItem[]>([]);
   const [session, setSession] = useState<SessionOverview | null>(null);
   const [scanTransport, setScanTransport] = useState("obfs4");
+  const [onionProjects, setOnionProjects] = useState<OnionProject[]>([]);
+  const [permanentSites, setPermanentSites] = useState<PermanentSite[]>([]);
+  const [onionAudits, setOnionAudits] = useState<Record<string, OnionAudit>>({});
+  const [issuedCredential, setIssuedCredential] =
+    useState<IssuedCredential | null>(null);
+  const [onionError, setOnionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -87,6 +100,22 @@ export function useTorApp() {
 
   const refreshSession = useCallback(async () => {
     setSession(await invoke<SessionOverview>("get_session_overview"));
+  }, []);
+
+  const refreshOnionHost = useCallback(async () => {
+    try {
+      const [temporary, permanent] = await Promise.all([
+        invoke<OnionProject[]>("list_onion_services"),
+        invoke<PermanentSite[]>("list_permanent_sites"),
+      ]);
+      setOnionProjects(temporary);
+      setPermanentSites(permanent);
+      setOnionError(null);
+    } catch (e) {
+      setOnionProjects([]);
+      setPermanentSites([]);
+      setOnionError(typeof e === "string" ? e : String(e));
+    }
   }, []);
 
   const clearFlash = useCallback(() => {
@@ -152,9 +181,9 @@ export function useTorApp() {
   }, [refreshStatus, refreshSession, settings?.status_poll_secs]);
 
   useEffect(() => {
-    // Nav consolidated into Connect (home) + System. Network/Bridges live under
-    // Connect; Settings/Logs/Harden live under System.
-    if (tab === "home" || tab === "system") {
+    // Network/Bridges live under Connect; Checkup/Harden/Startup Items under
+    // System; Preferences/Logs under Settings.
+    if (tab === "home" || tab === "settings") {
       void refreshSettings();
       void refreshSnowflake();
     }
@@ -166,6 +195,9 @@ export function useTorApp() {
       void refreshDetect();
       void refreshShellProxy();
     }
+    if (tab === "host") {
+      void refreshOnionHost();
+    }
   }, [
     tab,
     refreshDetect,
@@ -173,6 +205,7 @@ export function useTorApp() {
     refreshShellProxy,
     refreshSnowflake,
     refreshHarden,
+    refreshOnionHost,
   ]);
 
   // Apply the theme setting: toggle the `.dark` class on <html>, following the
@@ -205,13 +238,44 @@ export function useTorApp() {
   }, [refreshSession, torOn]);
 
   const protectionLabel = useMemo(() => {
-    if (!torOn) return "Disconnected";
-    if (tunOn) return "Protected · TUN";
-    if (proxyOn) {
-      return settings?.bridges_enabled ? "Protected · bridges" : "Protected";
+    const phase = status?.session_phase ?? "disconnected";
+    if (phase === "recovering") return "Recovering";
+    if (phase === "connecting") return "Connecting";
+    if (phase === "degraded") return "Degraded";
+    if (!torOn) return phase === "protected" ? "Degraded" : "Disconnected";
+    if (phase !== "protected") return "Tor ready";
+
+    const controlReady = status?.control_up ?? false;
+    const dnsReady = !status?.remote_dns || !!status?.dns_up;
+    const firewallReady =
+      !status?.kill_switch ||
+      (!!status?.firewall.active && !!status?.firewall.verified_live);
+
+    if (tunOn) {
+      return controlReady && dnsReady && firewallReady
+        ? "Protected · TUN"
+        : "TUN active · unverified";
     }
-    return settings?.bridges_enabled ? "Tor on · proxy off" : "Tor ready";
-  }, [torOn, tunOn, proxyOn, settings?.bridges_enabled]);
+    if (proxyOn) {
+      if (!controlReady || !dnsReady || !firewallReady) {
+        return "Proxy active · unverified";
+      }
+      return status?.bridges_enabled ? "Protected · bridges" : "Protected · proxy";
+    }
+    return status?.bridges_enabled ? "Tor on · proxy off" : "Tor ready";
+  }, [
+    torOn,
+    tunOn,
+    proxyOn,
+    status?.session_phase,
+    status?.control_up,
+    status?.remote_dns,
+    status?.dns_up,
+    status?.kill_switch,
+    status?.firewall.active,
+    status?.firewall.verified_live,
+    status?.bridges_enabled,
+  ]);
 
   const toggleTor = () => {
     if (busy || !status?.tor_installed) return;
@@ -329,11 +393,127 @@ export function useTorApp() {
       return `Found ${list.length} relay(s)`;
     });
 
+  /* Onion Host ------------------------------------------------------------- */
+
+  const startTemporarySite = (
+    localPort: number,
+    virtualPort: number,
+    isPrivate: boolean,
+  ) =>
+    void run(async () => {
+      const project = await invoke<OnionProject>("start_onion_service", {
+        localPort,
+        virtualPort,
+        private: isPrivate,
+      });
+      await refreshOnionHost();
+      return `Created ${project.hostname}`;
+    });
+
+  const stopTemporarySite = (serviceId: string) =>
+    void run(async () => {
+      const message = await invoke<string>("stop_onion_service", { serviceId });
+      await refreshOnionHost();
+      return message;
+    });
+
+  const auditTemporarySite = (serviceId: string) =>
+    void run(async () => {
+      const result = await invoke<OnionAudit>("audit_onion_service", {
+        serviceId,
+      });
+      setOnionAudits((current) => ({ ...current, [serviceId]: result }));
+      return result.published
+        ? "Onion site is published"
+        : "Descriptor is not reachable yet";
+    });
+
+  const addPermanentSite = (
+    nickname: string,
+    localPort: number,
+    virtualPort: number,
+    enableAuth: boolean,
+  ) =>
+    void run(async () => {
+      const site = await invoke<PermanentSite>("add_permanent_site", {
+        nickname,
+        localPort,
+        virtualPort,
+        enableAuth,
+      });
+      await refreshOnionHost();
+      return site.hostname
+        ? `Created ${site.hostname}`
+        : `Created "${site.nickname}". Tor is still publishing its address.`;
+    });
+
+  const removePermanentSite = (id: string) =>
+    void run(async () => {
+      const message = await invoke<string>("remove_permanent_site", { id });
+      await refreshOnionHost();
+      return message;
+    });
+
+  const renamePermanentSite = (id: string, nickname: string) =>
+    void run(async () => {
+      await invoke<PermanentSite>("rename_permanent_site", { id, nickname });
+      await refreshOnionHost();
+      return "Renamed site";
+    });
+
+  const addPermanentSiteClient = (id: string, name: string) =>
+    void run(async () => {
+      const issued = await invoke<IssuedCredential>(
+        "add_permanent_site_client",
+        { id, name },
+      );
+      setIssuedCredential(issued);
+      await refreshOnionHost();
+      return `Issued credential "${issued.client_name}". Copy it now — it is not stored.`;
+    });
+
+  const revokePermanentSiteClient = (id: string, name: string) =>
+    void run(async () => {
+      const message = await invoke<string>("revoke_permanent_site_client", {
+        id,
+        name,
+      });
+      await refreshOnionHost();
+      return message;
+    });
+
+  const setPermanentSiteAuth = (id: string, enabled: boolean) =>
+    void run(async () => {
+      await invoke<PermanentSite>("set_permanent_site_auth", { id, enabled });
+      await refreshOnionHost();
+      return enabled
+        ? "Client authorization is on"
+        : "Client authorization is off — anyone with the address can connect";
+    });
+
+  const auditPermanentSite = (id: string) =>
+    void run(async () => {
+      const result = await invoke<OnionAudit>("audit_permanent_site", { id });
+      setOnionAudits((current) => ({ ...current, [id]: result }));
+      return result.published
+        ? "Onion site is published"
+        : "Descriptor is not reachable yet";
+    });
+
+  const dismissIssuedCredential = useCallback(
+    () => setIssuedCredential(null),
+    [],
+  );
+
   return {
     tab,
     setTab,
     systemView,
     setSystemView,
+    settingsView,
+    setSettingsView,
+    hardenFocusId,
+    setHardenFocusId,
     status,
     ips,
     detect,
@@ -376,6 +556,23 @@ export function useTorApp() {
     refreshDetect,
     refreshShellProxy,
     refreshSession,
+    onionProjects,
+    permanentSites,
+    onionAudits,
+    onionError,
+    issuedCredential,
+    dismissIssuedCredential,
+    refreshOnionHost,
+    startTemporarySite,
+    stopTemporarySite,
+    auditTemporarySite,
+    addPermanentSite,
+    removePermanentSite,
+    renamePermanentSite,
+    addPermanentSiteClient,
+    revokePermanentSiteClient,
+    setPermanentSiteAuth,
+    auditPermanentSite,
     toggleTor,
     toggleProxy,
     saveSettings,

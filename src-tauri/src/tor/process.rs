@@ -307,6 +307,14 @@ pub fn ensure_data_dir() -> Result<PathBuf, String> {
     fs::create_dir_all(&base).map_err(|e| format!("Failed to create data dir: {e}"))?;
     let data_dir = base.join("tor-data");
     fs::create_dir_all(&data_dir).map_err(|e| format!("Failed to create tor data dir: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&base, fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("Failed to protect data dir: {e}"))?;
+        fs::set_permissions(&data_dir, fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("Failed to protect Tor data dir: {e}"))?;
+    }
     Ok(base)
 }
 
@@ -371,6 +379,10 @@ fn write_managed_torrc(app_dir: &Path) -> Result<PathBuf, String> {
         }
     }
 
+    // Permanent Onion Host sites. Tor owns the keys in these directories; we
+    // only point at them.
+    extra.push_str(&crate::onion_service::persistent::torrc_block());
+
     let contents = format!(
         "\
 SocksPort {SOCKS_HOST}:{SOCKS_PORT}
@@ -386,6 +398,12 @@ Log {} file {}
     );
     fs::write(&torrc, contents).map_err(|e| format!("Failed to write torrc: {e}"))?;
     Ok(torrc)
+}
+
+/// Regenerate torrc in place so a running Tor can pick changes up on reload.
+pub fn rewrite_torrc() -> Result<PathBuf, String> {
+    let app_dir = ensure_data_dir()?;
+    write_managed_torrc(&app_dir)
 }
 
 async fn stop_system_tor_service() {

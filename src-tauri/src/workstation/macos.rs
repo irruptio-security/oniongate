@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
 
-use super::{HostTool, PersistenceEntry, PersistenceReport, PostureCheck};
+use super::{PersistenceEntry, PersistenceReport, PostureCheck};
 
 fn output(program: &str, args: &[&str]) -> (bool, String) {
     Command::new(program)
@@ -410,47 +410,4 @@ pub fn login_items_snapshot() -> super::LoginItemsSnapshot {
         items,
         detail,
     }
-}
-
-pub fn host_tools() -> Vec<HostTool> {
-    [
-        (
-            "lulu",
-            "LuLu",
-            "/Applications/LuLu.app",
-            "https://objective-see.org/products/lulu.html",
-            "Outbound application firewall",
-        ),
-        (
-            "blockblock",
-            "BlockBlock",
-            "/Applications/BlockBlock Helper.app",
-            "https://objective-see.org/products/blockblock.html",
-            "Persistence change monitoring",
-        ),
-        (
-            "oversight",
-            "OverSight",
-            "/Applications/OverSight.app",
-            "https://objective-see.org/products/oversight.html",
-            "Microphone and camera monitoring",
-        ),
-        (
-            "knockknock",
-            "KnockKnock",
-            "/Applications/KnockKnock.app",
-            "https://objective-see.org/products/knockknock.html",
-            "On-demand persistence inventory",
-        ),
-    ]
-    .into_iter()
-    .map(|(id, name, path, url, purpose)| HostTool {
-        id: id.into(),
-        name: name.into(),
-        installed: Path::new(path).exists(),
-        path: Path::new(path).exists().then(|| path.to_string()),
-        official_url: url.into(),
-        purpose: purpose.into(),
-    })
-    .collect()
 }

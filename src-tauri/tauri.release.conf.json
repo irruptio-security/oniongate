@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "externalBin": [
+      "binaries/tor",
+      "binaries/sing-box",
+      "binaries/lyrebird",
+      "binaries/obfs4proxy",
+      "binaries/oniongate-helper"
+    ]
+  }
+}

@@ -17,6 +17,36 @@ make lint
 Do not add downloaded executables, onion keys, bridge lines, logs, or local
 security reports to commits.
 
+Regenerate app/tray icons on macOS after changing `public/logo.png`:
+
+```bash
+make icons
+```
+
+The icon task removes only the edge-connected black matte, writes dedicated
+tray assets, and regenerates Tauri's macOS/Windows/Linux icon bundles.
+
+## Documentation
+
+The site in `docs/` is VitePress and is published to GitHub Pages from `main`.
+
+```bash
+make docs           # hot-reloading preview
+make docs-build     # what the docs workflow builds; rejects unresolved internal links
+```
+
+`docs/guide/` is task-oriented material. `docs/reference/` covers architecture,
+platform support, local data/network activity, threat model, privacy, and the
+release process. Only the GitHub-conventional files
+(`README`, `SECURITY`, `CONTRIBUTING`, `CODE_OF_CONDUCT`) stay at the repository
+root. Update the docs in the same pull request as the behavior they describe.
+
+When a change adds or alters a network request, persisted field, elevated
+operation, platform guarantee, sidecar, CLI flag, recovery path, or user-visible
+control, update all affected guide and reference pages—not only the README.
+Claims about verification must state what is observed and what remains
+unproven.
+
 ## Pull requests
 
 - Keep network mutations behind a typed platform API.
@@ -24,8 +54,29 @@ security reports to commits.
 - Add tests for torrc, control-protocol, routing, firewall, and persistence
   changes.
 - Describe privacy/security impact and failure behavior.
+- Update platform support, data/network inventory, and threat-model limitations
+  when the protection boundary changes.
 - Preserve attribution and verify license compatibility for reused code.
 - Never weaken Tor circuits or silently fall back to a direct route.
+- Never read, log, or export onion service key material. Permanent sites are
+  deliberately owned by Tor inside its own data directory; OnionGate may read
+  only the public `hostname` file.
 
 Security vulnerabilities must follow [SECURITY.md](SECURITY.md), not public
 issues.
+
+## Preparing a release
+
+Invoke the project `release-changelog` Cursor skill with the intended version.
+Run it only from a clean `main` or `staging` checkout. Review its
+complete-history changelog and version diff, then run:
+
+```bash
+make release-check VERSION=0.2.1
+make release-bundle-local   # unsigned host-platform packaging smoke test
+```
+
+Merge that preparation before creating `v0.2.1`. Tag-triggered release CI
+refuses mismatched versions or a missing dated changelog section and creates
+only a draft for maintainer review. Tags outside `main`/`staging` are rejected;
+staging-origin drafts are always prereleases.

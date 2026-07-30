@@ -22,6 +22,12 @@ fn app_dir() -> Result<PathBuf, String> {
         .ok_or_else(|| "Could not resolve local data directory".to_string())?
         .join("tor-socks-gui");
     fs::create_dir_all(&base).map_err(|e| format!("Failed to create data dir: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&base, fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("Failed to protect data dir: {e}"))?;
+    }
     Ok(base)
 }
 
@@ -122,9 +128,16 @@ pub fn ensure_log_file() -> Result<PathBuf, String> {
         let mut f = OpenOptions::new()
             .create(true)
             .write(true)
+            .truncate(false)
             .open(&path)
             .map_err(|e| format!("Failed to create log file: {e}"))?;
         writeln!(f, "# Tor SOCKS Manager log").ok();
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("Failed to protect log file: {e}"))?;
     }
     Ok(path)
 }

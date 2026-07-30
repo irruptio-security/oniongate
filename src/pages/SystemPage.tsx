@@ -1,11 +1,9 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
 import type { TorApp } from "@/hooks/useTorApp";
-import { SettingsPage } from "@/pages/SettingsPage";
-import { LogsPage } from "@/pages/LogsPage";
+import { HardenPage } from "@/pages/HardenPage";
 import { cn } from "@/lib/utils";
 
 type PostureCheck = {
@@ -32,18 +30,20 @@ type PersistenceReport = {
   removed_ids: string[];
 };
 
-type HostTool = {
-  id: string;
-  name: string;
-  installed: boolean;
-  official_url: string;
-  purpose: string;
-};
-
 type LoginItemsSnapshot = {
   available: boolean;
   items: string[];
   detail: string;
+};
+
+/**
+ * Posture checks that a Harden toggle can actually resolve, so a failing check
+ * can hand the user straight to the control instead of describing it.
+ */
+const HARDEN_FOR_CHECK: Record<string, string> = {
+  filevault: "filevault",
+  firewall: "app_firewall",
+  remote_login: "remote_login",
 };
 
 export function SystemPage({ app }: { app: TorApp }) {
@@ -54,17 +54,11 @@ export function SystemPage({ app }: { app: TorApp }) {
   const [postureError, setPostureError] = useState<string | null>(null);
   const [persistence, setPersistence] = useState<PersistenceReport | null>(null);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
-  const [tools, setTools] = useState<HostTool[]>([]);
   const [loginItems, setLoginItems] = useState<LoginItemsSnapshot | null>(null);
 
   const refreshPosture = async () => {
     try {
-      const [checks, hostTools] = await Promise.all([
-        invoke<PostureCheck[]>("get_workstation_posture"),
-        invoke<HostTool[]>("get_host_security_tools"),
-      ]);
-      setPosture(checks);
-      setTools(hostTools);
+      setPosture(await invoke<PostureCheck[]>("get_workstation_posture"));
       setPostureError(null);
     } catch (error) {
       setPostureError(typeof error === "string" ? error : String(error));
@@ -84,30 +78,51 @@ export function SystemPage({ app }: { app: TorApp }) {
     void refreshPosture();
   }, []);
 
+  const openHarden = (hardenId: string) => {
+    app.setHardenFocusId(hardenId);
+    setView("harden");
+  };
+
   return (
-    <section className="flex flex-col gap-5">
-      <header>
-        <h2 className="text-xl font-semibold tracking-tight">System</h2>
-        <p className="mt-1 text-sm text-muted">
-          Read-only macOS posture and change detection. Unknown items are not labeled as malware.
-        </p>
-      </header>
+    <section className="flex min-h-0 flex-1 flex-col gap-5">
       <Segmented
         value={view}
         options={[
-          { value: "audit", label: "Posture" },
-          { value: "persistence", label: "Persistence" },
-          { value: "settings", label: "Settings" },
-          { value: "logs", label: "Logs" },
+          { value: "checkup", label: "Checkup" },
+          { value: "harden", label: "Harden" },
+          { value: "startup", label: "Startup Items" },
         ]}
         onChange={(next) => {
           setView(next);
-          if (next === "persistence") void refreshPersistence();
+          if (next === "startup") void refreshPersistence();
         }}
       />
 
-      {view === "audit" ? (
-        <>
+      {view === "checkup" ? (
+        <div className="flex flex-col gap-3">
+          <header className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h2 className="text-xl font-semibold tracking-tight">Checkup</h2>
+              <p className="mt-1 text-sm text-muted">
+                Read-only look at this machine's security state. Unknown items
+                are not labeled as malware.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  await refreshPosture();
+                  return "Checkup refreshed";
+                })
+              }
+            >
+              Re-run
+            </Button>
+          </header>
+
           {postureError ? (
             <div className="flex flex-col items-start gap-2 rounded-xl border border-line bg-panel px-4 py-3">
               <div className="text-sm font-semibold">Couldn't read posture</div>
@@ -127,65 +142,79 @@ export function SystemPage({ app }: { app: TorApp }) {
               No posture checks are available on this platform.
             </p>
           ) : null}
+
           <div className="space-y-1.5">
-            {(posture ?? []).map((item) => (
-              <div
-                key={item.id}
-                className="flex items-start justify-between gap-3 rounded-xl border border-line bg-panel px-3.5 py-2.5"
-              >
-                <div>
-                  <div className="text-sm font-semibold">{item.title}</div>
-                  <div className="text-xs text-muted">{item.detail}</div>
-                  {item.remediation ? (
-                    <div className="mt-1 text-[10px] text-muted">{item.remediation}</div>
-                  ) : null}
-                </div>
-                <span
-                  className={cn(
-                    "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase",
-                    item.status === "pass" && "bg-accent/15 text-accent-strong",
-                    item.status === "warn" && "bg-warn/15 text-warn-strong",
-                    item.status === "info" && "bg-panel-2 text-muted",
-                  )}
-                  title={item.source}
+            {(posture ?? []).map((item) => {
+              const hardenId = HARDEN_FOR_CHECK[item.id];
+              const fixable = item.status !== "pass" && !!hardenId;
+              return (
+                <div
+                  key={item.id}
+                  className="flex items-start justify-between gap-3 rounded-xl border border-line bg-panel px-3.5 py-2.5"
                 >
-                  {item.status}
-                </span>
-              </div>
-            ))}
-          </div>
-          <div className="rounded-xl border border-line bg-panel p-4">
-            <div className="text-sm font-semibold">Objective-See integrations</div>
-            <p className="mt-0.5 text-xs text-muted">
-              OnionGate detects and recommends these official tools; it does not bundle or duplicate
-              them.
-            </p>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-              {tools.map((tool) => (
-                <button
-                  key={tool.id}
-                  type="button"
-                  className="rounded-lg border border-line p-2 text-left"
-                  onClick={() => void openUrl(tool.official_url)}
-                >
-                  <div className="text-xs font-semibold">
-                    {tool.name} · {tool.installed ? "installed" : "not detected"}
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold">{item.title}</div>
+                    <div className="text-xs text-muted">{item.detail}</div>
+                    {item.remediation ? (
+                      <div className="mt-1 text-[10px] text-muted">
+                        {item.remediation}
+                      </div>
+                    ) : null}
                   </div>
-                  <div className="text-[10px] text-muted">{tool.purpose}</div>
-                </button>
-              ))}
-            </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {fixable ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => openHarden(hardenId)}
+                      >
+                        Fix in Harden
+                      </Button>
+                    ) : null}
+                    <span
+                      className={cn(
+                        "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase",
+                        item.status === "pass" &&
+                          "bg-accent/15 text-accent-strong",
+                        item.status === "warn" && "bg-warn/15 text-warn-strong",
+                        item.status === "info" && "bg-panel-2 text-muted",
+                      )}
+                      title={item.source}
+                    >
+                      {item.status}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        </>
+        </div>
       ) : null}
 
-      {view === "persistence" ? (
+      {view === "harden" ? <HardenPage app={app} /> : null}
+
+      {view === "startup" ? (
         <div className="space-y-3">
+          <header>
+            <h2 className="text-xl font-semibold tracking-tight">
+              Startup Items
+            </h2>
+            <p className="mt-1 text-sm text-muted">
+              What this machine runs on its own — LaunchAgents, daemons, and
+              login items — and what changed since your trusted baseline.
+            </p>
+          </header>
+
           <div className="flex gap-2">
             <Button
               variant="secondary"
               disabled={busy}
-              onClick={() => void run(async () => (await refreshPersistence(), "Inventory refreshed"))}
+              onClick={() =>
+                void run(async () => {
+                  await refreshPersistence();
+                  return "Inventory refreshed";
+                })
+              }
             >
               Refresh inventory
             </Button>
@@ -193,7 +222,9 @@ export function SystemPage({ app }: { app: TorApp }) {
               disabled={busy}
               onClick={() =>
                 void run(async () => {
-                  const message = await invoke<string>("save_persistence_baseline");
+                  const message = await invoke<string>(
+                    "save_persistence_baseline",
+                  );
                   await refreshPersistence();
                   return message;
                 })
@@ -213,17 +244,24 @@ export function SystemPage({ app }: { app: TorApp }) {
           {persistence ? (
             <>
               <p className="text-xs text-muted">
-                {persistence.entries.length} entries · {persistence.added.length} added ·{" "}
-                {persistence.removed_ids.length} removed since baseline
+                {persistence.entries.length} entries · {persistence.added.length}{" "}
+                added · {persistence.removed_ids.length} removed since baseline
               </p>
               <div className="max-h-[28rem] space-y-1 overflow-auto">
                 {persistence.entries.map((entry) => (
-                  <div key={entry.id} className="rounded-lg border border-line bg-panel px-3 py-2">
+                  <div
+                    key={entry.id}
+                    className="rounded-lg border border-line bg-panel px-3 py-2"
+                  >
                     <div className="text-xs font-semibold">{entry.kind}</div>
-                    <div className="truncate font-mono text-[10px] text-muted">{entry.path}</div>
+                    <div className="truncate font-mono text-[10px] text-muted">
+                      {entry.path}
+                    </div>
                     {entry.signed != null ? (
                       <div className="text-[10px] text-muted">
-                        {entry.signed ? "Signature valid" : "Unsigned or invalid signature"}
+                        {entry.signed
+                          ? "Signature valid"
+                          : "Unsigned or invalid signature"}
                         {entry.team_id ? ` · Team ${entry.team_id}` : ""}
                       </div>
                     ) : null}
@@ -236,10 +274,12 @@ export function SystemPage({ app }: { app: TorApp }) {
           <div className="rounded-xl border border-line bg-panel p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-sm font-semibold">Background / Login Items</div>
+                <div className="text-sm font-semibold">
+                  Background / Login Items
+                </div>
                 <p className="text-[11px] text-muted">
-                  Scanned only when you ask. Needs Full Disk Access and is kept out of the automatic
-                  baseline so it never prompts repeatedly.
+                  Scanned only when you ask. Needs Full Disk Access and is kept
+                  out of the automatic baseline so it never prompts repeatedly.
                 </p>
               </div>
               <div className="flex gap-2">
@@ -249,7 +289,8 @@ export function SystemPage({ app }: { app: TorApp }) {
                   disabled={busy}
                   onClick={() =>
                     void run(async () => {
-                      const snapshot = await invoke<LoginItemsSnapshot>("scan_login_items");
+                      const snapshot =
+                        await invoke<LoginItemsSnapshot>("scan_login_items");
                       setLoginItems(snapshot);
                       return snapshot.detail;
                     })
@@ -285,15 +326,14 @@ export function SystemPage({ app }: { app: TorApp }) {
                   )}
                 </ul>
               ) : (
-                <p className="mt-2 text-[11px] text-warn">{loginItems.detail}</p>
+                <p className="mt-2 text-[11px] text-warn">
+                  {loginItems.detail}
+                </p>
               )
             ) : null}
           </div>
         </div>
       ) : null}
-
-      {view === "settings" ? <SettingsPage app={app} /> : null}
-      {view === "logs" ? <LogsPage app={app} /> : null}
     </section>
   );
 }

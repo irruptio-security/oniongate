@@ -6,18 +6,26 @@ alwaysApply: true
 # OnionGate
 
 Tauri 2 desktop app (React UI + Rust core) that routes selected apps through
-isolated Tor circuits, runs an ephemeral Onion Lab, and verifies the workstation
-is not leaking. It is **not** a VPN, Tor Browser, Tails, Whonix, an antivirus, or
-a general application firewall.
+isolated Tor circuits, hosts temporary and permanent onion sites via Onion Host,
+and runs live routing/leak diagnostics. It is **not** a VPN, Tor Browser, Tails,
+Whonix, an antivirus, or a general application firewall.
 
 ## Non-negotiable invariants (apply everywhere)
 
 - **Fail closed.** Never silently fall back to a direct route when Tor, TUN, or
   the route policy is unavailable. Guarded apps must suspend rather than leak.
 - **Never weaken Tor circuits** or downgrade isolation just to "make it work."
-- **Never log, persist, or export secrets:** onion private keys, v3 client
-  authorization, bridge lines, Tor control cookies, verification public IPs, or
-  full process command lines.
+- **Never log, export, upload, or commit secrets.** Private v3 client
+  credentials and verification public IPs remain memory-only; full process
+  command lines never enter storage or reports. User-selected bridge lines may
+  persist only in protected local settings/library storage so they survive a
+  restart, never in logs or exports. Managed Tor may write its runtime control
+  cookie inside its own protected data directory; OnionGate may read it for
+  local authentication but never copy or export it. A **permanent** Onion Host
+  site's key is generated and owned by *Tor* inside its own data directory at
+  owner-only permissions. OnionGate must never read, copy, log, or export that
+  key — it may only read the public `hostname` file. Temporary sites still use
+  `DiscardPK` and persist nothing.
 - **Every privileged/network mutation** (proxy, TUN, firewall, Tor, transport)
   must be journaled for crash recovery and be reversible.
 - **GUI and CLI call the same orchestration APIs.** No command may report a
@@ -28,5 +36,7 @@ a general application firewall.
 ## Where things live
 
 `src/` React UI · `src-tauri/src/` Rust core · `scripts/` dependency fetch ·
-`.github/` CI/release. Human docs: `README`, `ARCHITECTURE`, `THREAT_MODEL`,
-`SECURITY`, `PRIVACY`, `RELEASE`, `CONTRIBUTING`, `docs/DEMO`.
+`.github/` CI/release · `docs/` VitePress site (`guide/` how-to, `reference/`
+architecture, threat model, privacy, release). Root-level docs are the
+GitHub-conventional ones only: `README`, `SECURITY`, `CONTRIBUTING`,
+`CODE_OF_CONDUCT`.

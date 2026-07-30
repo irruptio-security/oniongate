@@ -150,11 +150,11 @@ export function ScannerPage({ app }: { app: TorApp }) {
                       : "accent",
                 }}
                 description="Built-in Snowflake, meek, and conjure lines ship with OnionGate. Obtain obfs4/webtunnel lines directly from the Tor Project's BridgeDB."
-                detail="This does not change Smart Connect on Home."
+                detail="Smart Connect can record builtin:snowflake here after selecting its fallback."
               />
             </span>
           }
-          description="Controls catalogs and Use bridges — not Home Smart Connect"
+          description="Controls catalogs and Use bridges; Smart Connect may record its fallback"
         >
           <Select
             className="h-9 w-52"
@@ -192,6 +192,7 @@ export function ScannerPage({ app }: { app: TorApp }) {
           >
             <option value="none">None (recommended)</option>
             <option value="auto">Built-in censorship fallback</option>
+            <option value="builtin:snowflake">Smart Connect Snowflake fallback</option>
             <option value="transport:snowflake">Built-in Snowflake</option>
             <option value="transport:meek">Built-in meek</option>
             <option value="transport:conjure">Built-in conjure</option>

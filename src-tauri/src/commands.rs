@@ -56,6 +56,7 @@ pub struct AppStatus {
     pub dns_port: u16,
     pub install_hint: String,
     pub persistence_changes: usize,
+    pub session_phase: crate::session::SessionPhase,
 }
 
 fn install_hint() -> String {
@@ -100,6 +101,7 @@ pub async fn get_status() -> AppStatus {
         dns_port: DNS_PORT,
         install_hint: install_hint(),
         persistence_changes: crate::workstation::persistence_change_count(),
+        session_phase: crate::session::load().phase,
     }
 }
 
@@ -125,8 +127,8 @@ pub fn privileged_helper_status() -> crate::helper::HelperStatus {
     crate::helper::service::status()
 }
 
-/// Install the privileged helper (one elevation prompt); afterwards privileged
-/// actions run without prompting.
+/// Install the privileged helper (one elevation prompt); afterward its typed
+/// kill-switch operations run without prompting.
 #[tauri::command]
 pub async fn install_privileged_helper() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(crate::helper::service::install)
@@ -232,7 +234,9 @@ async fn maybe_auto_enable_proxy(
             }
             Err(e) => {
                 crate::logs::append(format!("Auto-enable proxy failed: {e}"));
-                return Ok(format!("{msg}. Proxy not enabled: {e}"));
+                return Err(format!(
+                    "{msg}. Requested system proxy was not enabled: {e}"
+                ));
             }
         }
     }
@@ -299,8 +303,15 @@ pub async fn start_tor(state: State<'_, AppState>) -> Result<String, String> {
                     parts.push(kmsg);
                 }
                 Err(e) => {
-                    // TUN is up; kill-switch failure is non-fatal but visible.
-                    parts.push(format!("Kill switch not enabled: {e}"));
+                    crate::logs::append(format!("Required kill switch failed: {e}"));
+                    let _ = crate::session::set_phase(
+                        crate::session::SessionPhase::Degraded,
+                        Some(e.clone()),
+                    );
+                    return Err(format!(
+                        "Tor and TUN are up, but the requested kill switch was not verified ({e}). \
+                         The session is degraded; retry the kill switch or disconnect."
+                    ));
                 }
             }
         }
@@ -309,6 +320,18 @@ pub async fn start_tor(state: State<'_, AppState>) -> Result<String, String> {
     }
 
     let result = maybe_auto_enable_proxy(&state, parts.join(". ")).await;
+    let result = match result {
+        Ok(message) if settings.kill_switch => {
+            crate::session::expect_firewall(true)?;
+            match crate::firewall::enable_kill_switch().await {
+                Ok(kill_switch) => Ok(format!("{message}. {kill_switch}")),
+                Err(error) => Err(format!(
+                    "Tor started, but the requested kill switch was not verified ({error})"
+                )),
+            }
+        }
+        other => other,
+    };
     match &result {
         Ok(_) => {
             crate::session::set_phase(crate::session::SessionPhase::Protected, None)?;
@@ -321,28 +344,6 @@ pub async fn start_tor(state: State<'_, AppState>) -> Result<String, String> {
         }
     }
     result
-}
-
-#[tauri::command]
-pub async fn smart_connect(state: State<'_, AppState>) -> Result<tor::SmartConnectResult, String> {
-    crate::session::begin_connect()?;
-    let result = {
-        let mut guard = state.managed_tor.lock().await;
-        tor::smart_connect(&mut guard).await?
-    };
-    let transports = if result.strategy == "builtin:snowflake" {
-        vec!["snowflake".into()]
-    } else {
-        tor::pt::transports_from_bridge_lines(&settings::load().bridge_lines)
-            .into_iter()
-            .map(|transport| transport.as_str().to_string())
-            .collect()
-    };
-    crate::session::expect_transports(transports)?;
-    crate::logs::append(&result.message);
-    let _ = maybe_auto_enable_proxy(&state, result.message.clone()).await?;
-    crate::session::set_phase(crate::session::SessionPhase::Protected, None)?;
-    Ok(result)
 }
 
 #[tauri::command]
@@ -497,7 +498,63 @@ pub async fn stop_onion_service(service_id: String) -> Result<String, String> {
 pub async fn audit_onion_service(
     service_id: String,
 ) -> Result<crate::onion_service::audit::OnionAudit, String> {
-    crate::onion_service::audit(&service_id).await
+    crate::onion_service::audit_temporary(&service_id).await
+}
+
+#[tauri::command]
+pub fn list_permanent_sites() -> Vec<crate::onion_service::persistent::PermanentSiteView> {
+    crate::onion_service::persistent::list()
+}
+
+#[tauri::command]
+pub async fn add_permanent_site(
+    nickname: String,
+    local_port: u16,
+    virtual_port: u16,
+    enable_auth: bool,
+) -> Result<crate::onion_service::persistent::PermanentSiteView, String> {
+    crate::onion_service::persistent::add(&nickname, local_port, virtual_port, enable_auth).await
+}
+
+#[tauri::command]
+pub async fn remove_permanent_site(id: String) -> Result<String, String> {
+    crate::onion_service::persistent::remove(&id).await
+}
+
+#[tauri::command]
+pub async fn rename_permanent_site(
+    id: String,
+    nickname: String,
+) -> Result<crate::onion_service::persistent::PermanentSiteView, String> {
+    crate::onion_service::persistent::rename(&id, &nickname).await
+}
+
+#[tauri::command]
+pub async fn add_permanent_site_client(
+    id: String,
+    name: String,
+) -> Result<crate::onion_service::persistent::IssuedCredential, String> {
+    crate::onion_service::persistent::add_client(&id, &name).await
+}
+
+#[tauri::command]
+pub async fn revoke_permanent_site_client(id: String, name: String) -> Result<String, String> {
+    crate::onion_service::persistent::revoke_client(&id, &name).await
+}
+
+#[tauri::command]
+pub async fn set_permanent_site_auth(
+    id: String,
+    enabled: bool,
+) -> Result<crate::onion_service::persistent::PermanentSiteView, String> {
+    crate::onion_service::persistent::set_auth_enabled(&id, enabled).await
+}
+
+#[tauri::command]
+pub async fn audit_permanent_site(
+    id: String,
+) -> Result<crate::onion_service::audit::OnionAudit, String> {
+    crate::onion_service::audit_permanent(&id).await
 }
 
 #[tauri::command]
@@ -513,11 +570,6 @@ pub fn get_persistence_report() -> Result<crate::workstation::PersistenceReport,
 #[tauri::command]
 pub fn save_persistence_baseline() -> Result<String, String> {
     crate::workstation::save_persistence_baseline()
-}
-
-#[tauri::command]
-pub fn get_host_security_tools() -> Vec<crate::workstation::HostTool> {
-    crate::workstation::host_tools()
 }
 
 /// Explicit Background/Login Items scan (`sfltool dumpbtm`). Runs only on user
@@ -880,10 +932,23 @@ pub async fn start_tun(state: State<'_, AppState>) -> Result<String, String> {
             if settings.kill_switch {
                 crate::session::expect_firewall(true)?;
                 match crate::firewall::enable_kill_switch().await {
-                    Ok(k) => Ok(format!("{msg}. {k}")),
-                    Err(e) => Ok(format!("{msg}. Kill switch not enabled: {e}")),
+                    Ok(k) => {
+                        crate::session::set_phase(crate::session::SessionPhase::Protected, None)?;
+                        Ok(format!("{msg}. {k}"))
+                    }
+                    Err(e) => {
+                        let _ = crate::session::set_phase(
+                            crate::session::SessionPhase::Degraded,
+                            Some(e.clone()),
+                        );
+                        Err(format!(
+                            "{msg}, but the requested kill switch was not verified ({e}). \
+                             The session is degraded."
+                        ))
+                    }
                 }
             } else {
+                crate::session::set_phase(crate::session::SessionPhase::Protected, None)?;
                 Ok(msg)
             }
         }
@@ -909,11 +974,33 @@ pub async fn set_kill_switch(enabled: bool) -> Result<String, String> {
     settings::update(|s| s.kill_switch = enabled)?;
     if enabled {
         crate::session::expect_firewall(true)?;
-        crate::firewall::enable_kill_switch().await
+        match crate::firewall::enable_kill_switch().await {
+            Ok(message) => {
+                if tor::socks_reachable() && crate::tun::process_seems_running() {
+                    crate::session::set_phase(crate::session::SessionPhase::Protected, None)?;
+                }
+                Ok(message)
+            }
+            Err(error) => {
+                if crate::session::load().phase != crate::session::SessionPhase::Disconnected {
+                    let _ = crate::session::set_phase(
+                        crate::session::SessionPhase::Degraded,
+                        Some(error.clone()),
+                    );
+                }
+                Err(error)
+            }
+        }
     } else {
         let result = crate::firewall::disable_kill_switch().await;
         if result.is_ok() {
             crate::session::expect_firewall(false)?;
+            if tor::socks_reachable() && crate::tun::process_seems_running() {
+                crate::session::set_phase(crate::session::SessionPhase::Protected, None)?;
+            }
+        } else if crate::session::load().phase != crate::session::SessionPhase::Disconnected {
+            let error = result.as_ref().err().cloned().unwrap_or_default();
+            let _ = crate::session::set_phase(crate::session::SessionPhase::Degraded, Some(error));
         }
         result
     }

@@ -10,7 +10,6 @@
     "core:window:allow-center",
     "core:window:allow-current-monitor",
     "core:window:allow-show",
-    "opener:default",
     "dialog:default",
     "dialog:allow-open",
     "updater:default",

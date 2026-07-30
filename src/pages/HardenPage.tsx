@@ -5,6 +5,7 @@ import { Switch } from "@/components/ui/switch";
 import { InfoTip, type TipTone } from "@/components/ui/tooltip";
 import type { TorApp } from "@/hooks/useTorApp";
 import type { HardenItem, KillSiriStatus, MacPortsStatus } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 function Group({
   title,
@@ -30,14 +31,22 @@ function HardenRow({
   busy,
   onApply,
   description,
+  highlight,
 }: {
   h: HardenItem;
   busy: boolean;
   onApply: (id: string, enable: boolean) => void;
   description?: string;
+  highlight?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 px-3 py-2">
+    <div
+      data-harden-id={h.id}
+      className={cn(
+        "flex items-center justify-between gap-3 px-3 py-2 transition-colors",
+        highlight && "bg-accent/10 ring-1 ring-inset ring-accent/50",
+      )}
+    >
       <div className="min-w-0">
         <div className="inline-flex min-w-0 items-center gap-1.5 text-[13px] font-medium text-ink">
           <span className="truncate">{h.title}</span>
@@ -163,6 +172,8 @@ export function HardenPage({ app }: { app: TorApp }) {
     run,
     refreshHarden,
     refreshSettings,
+    hardenFocusId,
+    setHardenFocusId,
   } = app;
 
   const os = detect?.os ?? "";
@@ -183,10 +194,19 @@ export function HardenPage({ app }: { app: TorApp }) {
     }
   };
 
-  // OS Hardening is a top-level tab; fetch items when it mounts.
   useEffect(() => {
     void refreshHarden();
   }, [refreshHarden]);
+
+  // Checkup hands off a control id; reveal that row, then drop the highlight.
+  useEffect(() => {
+    if (!hardenFocusId || harden.length === 0) return;
+    document
+      .querySelector(`[data-harden-id="${hardenFocusId}"]`)
+      ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    const timer = window.setTimeout(() => setHardenFocusId(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, [hardenFocusId, harden.length, setHardenFocusId]);
 
   useEffect(() => {
     void refreshExtras();
@@ -220,10 +240,10 @@ export function HardenPage({ app }: { app: TorApp }) {
     <section className="flex flex-col gap-3">
       <header className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="text-xl font-semibold tracking-tight">OS Hardening</h2>
+          <h2 className="text-xl font-semibold tracking-tight">Harden</h2>
           <p className="text-xs text-muted">
-            Reversible {platformBadge} privacy &amp; security helpers · details in
-            (i)
+            Reversible {platformBadge} privacy &amp; security changes · details
+            in (i)
           </p>
         </div>
         <span className="inline-flex items-center gap-1 rounded-md border border-line bg-panel px-2 py-0.5 text-[11px] font-semibold text-ink">
@@ -321,6 +341,7 @@ export function HardenPage({ app }: { app: TorApp }) {
                   h={h}
                   busy={busy}
                   onApply={apply}
+                  highlight={h.id === hardenFocusId}
                   description={
                     h.supported
                       ? undefined
@@ -339,6 +360,7 @@ export function HardenPage({ app }: { app: TorApp }) {
                   h={h}
                   busy={busy}
                   onApply={apply}
+                  highlight={h.id === hardenFocusId}
                   description={h.supported ? undefined : "Unsupported"}
                 />
               ))}
@@ -348,7 +370,13 @@ export function HardenPage({ app }: { app: TorApp }) {
           {groups.tools.length ? (
             <Group title="Tools">
               {groups.tools.map((h) => (
-                <HardenRow key={h.id} h={h} busy={busy} onApply={apply} />
+                <HardenRow
+                  key={h.id}
+                  h={h}
+                  busy={busy}
+                  onApply={apply}
+                  highlight={h.id === hardenFocusId}
+                />
               ))}
             </Group>
           ) : null}

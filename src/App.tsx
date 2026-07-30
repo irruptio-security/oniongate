@@ -1,12 +1,12 @@
 import { useState } from "react";
 import {
-  FlaskConical,
+  Globe,
   Home,
-  Lock,
   PanelLeftClose,
   PanelLeftOpen,
   Shield,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   type LucideIcon,
 } from "lucide-react";
@@ -14,9 +14,9 @@ import { useTorApp } from "@/hooks/useTorApp";
 import { ConnectPage } from "@/pages/ConnectPage";
 import { AppsPage } from "@/pages/AppsPage";
 import { VerifyPage } from "@/pages/VerifyPage";
-import { OnionLabPage } from "@/pages/OnionLabPage";
+import { OnionHostPage } from "@/pages/OnionHostPage";
 import { SystemPage } from "@/pages/SystemPage";
-import { HardenPage } from "@/pages/HardenPage";
+import { AppSettingsPage } from "@/pages/AppSettingsPage";
 import { Flash } from "@/components/Flash";
 import { SetupWizard } from "@/components/SetupWizard";
 import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
@@ -33,10 +33,10 @@ import {
 const NAV: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: "home", label: "Connect", icon: Home },
   { id: "apps", label: "Apps", icon: Sparkles },
-  { id: "onion-lab", label: "Onion Lab", icon: FlaskConical },
+  { id: "host", label: "Host", icon: Globe },
   { id: "verify", label: "Verify", icon: ShieldCheck },
-  { id: "harden", label: "OS Hardening", icon: Lock },
   { id: "system", label: "System", icon: Shield },
+  { id: "settings", label: "Settings", icon: SlidersHorizontal },
 ];
 
 export default function App() {
@@ -189,10 +189,10 @@ export default function App() {
           <div className="mx-auto min-h-full w-full max-w-4xl px-6 pb-5 pt-11 animate-[fade-in_280ms_ease-out]">
             {app.tab === "home" ? <ConnectPage app={app} /> : null}
             {app.tab === "apps" ? <AppsPage app={app} /> : null}
-            {app.tab === "onion-lab" ? <OnionLabPage app={app} /> : null}
+            {app.tab === "host" ? <OnionHostPage app={app} /> : null}
             {app.tab === "verify" ? <VerifyPage app={app} /> : null}
-            {app.tab === "harden" ? <HardenPage app={app} /> : null}
             {app.tab === "system" ? <SystemPage app={app} /> : null}
+            {app.tab === "settings" ? <AppSettingsPage app={app} /> : null}
           </div>
         </main>
       </div>

@@ -4,24 +4,209 @@ on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
+  verify:
+    name: Verify release commit
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    outputs:
+      source_branch: ${{ steps.source.outputs.branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require tag commit on main or staging
+        id: source
+        shell: bash
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git fetch --no-tags origin staging:refs/remotes/origin/staging || true
+          tag_commit="$(git rev-parse "$GITHUB_SHA^{commit}")"
+
+          if git merge-base --is-ancestor "$tag_commit" origin/main; then
+            branch=main
+          elif git show-ref --verify --quiet refs/remotes/origin/staging &&
+               git merge-base --is-ancestor "$tag_commit" origin/staging
+          then
+            branch=staging
+          else
+            echo "::error::Release tags must point to a commit reachable from main or staging"
+            exit 1
+          fi
+
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "Release source branch: $branch"
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: src-tauri
+          shared-key: release-verify
+      - name: Install Tauri build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            rpm \
+            cpio
+      - run: npm ci
+      - run: node scripts/check-release.mjs "${GITHUB_REF_NAME}"
+      - run: npm run typecheck
+      - run: npm run fmt:check
+      - run: npm run lint:rust
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets
+      - run: npm run docs:build
+      - run: npm audit --omit=dev --audit-level=high
+      - name: Audit Rust dependencies
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit --file src-tauri/Cargo.lock
+
+  prepare:
+    name: Validate tag and create draft
+    needs: verify
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.release.outputs.id }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Validate synchronized versions and changelog
+        run: node scripts/check-release.mjs "${GITHUB_REF_NAME}"
+      - name: Extract release notes
+        run: node scripts/extract-release-notes.mjs "${GITHUB_REF_NAME}" release-notes.md
+      - name: Validate signing credentials before creating a draft
+        env:
+          UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          UPDATER_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          SOURCE_BRANCH: ${{ needs.verify.outputs.source_branch }}
+        shell: bash
+        run: |
+          for name in \
+            UPDATER_KEY \
+            UPDATER_PASSWORD \
+            APPLE_CERTIFICATE \
+            APPLE_CERTIFICATE_PASSWORD \
+            APPLE_SIGNING_IDENTITY \
+            APPLE_TEAM_ID \
+            APPLE_API_KEY \
+            APPLE_API_ISSUER \
+            APPLE_API_KEY_BASE64
+          do
+            test -n "${!name}" || { echo "::error::Missing release secret $name"; exit 1; }
+          done
+          version="${GITHUB_REF_NAME#v}"
+          if [[ -z "$WINDOWS_CERTIFICATE" ]]; then
+            if [[ "$SOURCE_BRANCH" == staging || "$version" == 0.* || "$version" == *-* ]]; then
+              echo "::warning::Windows will be unsigned and must remain experimental"
+            else
+              echo "::error::Stable releases require WINDOWS_CERTIFICATE"
+              exit 1
+            fi
+          elif [[ -z "$WINDOWS_CERTIFICATE_PASSWORD" ]]; then
+            echo "::error::WINDOWS_CERTIFICATE_PASSWORD is required with WINDOWS_CERTIFICATE"
+            exit 1
+          fi
+      - name: Create or refresh the draft release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_BRANCH: ${{ needs.verify.outputs.source_branch }}
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          prerelease=false
+          title_suffix=""
+          if [[ "$SOURCE_BRANCH" == staging ]]; then
+            prerelease=true
+            title_suffix=" (staging)"
+          elif [[ "$version" == 0.* || "$version" == *-* ]]; then
+            prerelease=true
+          fi
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --draft \
+              --prerelease="$prerelease" \
+              --latest=false \
+              --title "OnionGate $GITHUB_REF_NAME$title_suffix" \
+              --notes-file release-notes.md
+          else
+            flags=(--verify-tag --draft --latest=false)
+            if [[ "$prerelease" == true ]]; then flags+=(--prerelease); fi
+            gh release create "$GITHUB_REF_NAME" \
+              "${flags[@]}" \
+              --title "OnionGate $GITHUB_REF_NAME$title_suffix" \
+              --notes-file release-notes.md
+          fi
+
+          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq .id)"
+          echo "id=$release_id" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
   build:
+    name: Build ${{ matrix.name }}
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
+      # tauri-action merges each target into latest.json. Serializing avoids
+      # concurrent delete/upload races that can drop platform entries.
+      max-parallel: 1
       matrix:
         include:
-          - os: macos-14
-            args: --target aarch64-apple-darwin
-          - os: macos-13
-            args: --target x86_64-apple-darwin
-          - os: ubuntu-22.04
-            args: ""
-          - os: windows-2022
-            args: ""
-    runs-on: ${{ matrix.os }}
+          - name: macOS Apple Silicon
+            os: macos-15
+            target: aarch64-apple-darwin
+            extension: ""
+            bundles: dmg
+          - name: macOS Intel
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+            extension: ""
+            bundles: dmg
+          - name: Linux x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            extension: ""
+            bundles: appimage,deb,rpm
+          - name: Windows x86_64
+            os: windows-2022
+            target: x86_64-pc-windows-msvc
+            extension: ".exe"
+            bundles: nsis
     env:
       WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
       WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
@@ -33,23 +218,32 @@ jobs:
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          shared-key: release-${{ matrix.target }}
       - name: Linux prerequisites
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
       - run: npm ci
-      - run: npm run deps
+      - name: Stage verified runtimes
+        run: npm run deps
       - name: Validate release credentials
         shell: bash
         env:
           UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           UPDATER_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
@@ -58,6 +252,9 @@ jobs:
           test -n "$UPDATER_PASSWORD" || { echo "::error::Missing TAURI_SIGNING_PRIVATE_KEY_PASSWORD"; exit 1; }
           if [[ "$RUNNER_OS" == "macOS" ]]; then
             test -n "$APPLE_CERTIFICATE" || { echo "::error::Missing APPLE_CERTIFICATE"; exit 1; }
+            test -n "$APPLE_CERTIFICATE_PASSWORD" || { echo "::error::Missing APPLE_CERTIFICATE_PASSWORD"; exit 1; }
+            test -n "$APPLE_SIGNING_IDENTITY" || { echo "::error::Missing APPLE_SIGNING_IDENTITY"; exit 1; }
+            test -n "$APPLE_TEAM_ID" || { echo "::error::Missing APPLE_TEAM_ID"; exit 1; }
             test -n "$APPLE_API_KEY" || { echo "::error::Missing APPLE_API_KEY"; exit 1; }
             test -n "$APPLE_API_ISSUER" || { echo "::error::Missing APPLE_API_ISSUER"; exit 1; }
             test -n "$APPLE_API_KEY_BASE64" || { echo "::error::Missing APPLE_API_KEY_BASE64"; exit 1; }
@@ -65,6 +262,22 @@ jobs:
           if [[ "$RUNNER_OS" == "Windows" && -z "$WINDOWS_CERTIFICATE" ]]; then
             echo "::warning::Windows artifact is unsigned and must remain experimental"
           fi
+      - name: Build and stage privileged helper
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          EXTENSION: ${{ matrix.extension }}
+        run: |
+          cargo build \
+            --manifest-path src-tauri/Cargo.toml \
+            --release \
+            --bin oniongate-helper \
+            --target "$TARGET"
+          source_path="src-tauri/target/$TARGET/release/oniongate-helper$EXTENSION"
+          destination="src-tauri/binaries/oniongate-helper-$TARGET$EXTENSION"
+          test -f "$source_path"
+          cp "$source_path" "$destination"
+          if [[ "$RUNNER_OS" != "Windows" ]]; then chmod 755 "$destination"; fi
       - name: Prepare Apple notarization API key
         if: runner.os == 'macOS'
         shell: bash
@@ -85,11 +298,12 @@ jobs:
           [IO.File]::WriteAllBytes($path, $bytes)
           $secure = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
           $cert = Import-PfxCertificate -FilePath $path -CertStoreLocation Cert:\CurrentUser\My -Password $secure
+          if (-not $cert) { throw "Windows signing certificate import failed" }
           "TAURI_CONFIG={""bundle"":{""windows"":{""certificateThumbprint"":""$($cert.Thumbprint)"",""digestAlgorithm"":""sha256"",""timestampUrl"":""http://timestamp.digicert.com""}}}" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Build, sign, and upload
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -100,25 +314,160 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
         with:
+          releaseId: ${{ needs.prepare.outputs.release_id }}
           tagName: ${{ github.ref_name }}
-          releaseName: OnionGate ${{ github.ref_name }}
-          releaseDraft: true
-          prerelease: true
-          args: ${{ matrix.args }}
+          args: >-
+            --target ${{ matrix.target }}
+            --bundles ${{ matrix.bundles }}
+            --config src-tauri/tauri.release.conf.json
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
+          uploadUpdaterSignatures: true
+          uploadWorkflowArtifacts: true
+          retryAttempts: 5
+      - name: Verify macOS code signatures
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          app_bundle="$(printf '%s\n' src-tauri/target/"$TARGET"/release/bundle/macos/*.app | head -n 1)"
+          test -d "$app_bundle"
+          test -x "$app_bundle/Contents/MacOS/oniongate-helper"
+          test -x "$app_bundle/Contents/MacOS/oniongate"
+          codesign --verify --deep --strict --verbose=2 "$app_bundle"
+          spctl --assess --type execute --verbose=4 "$app_bundle"
+          xcrun stapler validate "$app_bundle"
+          dmg="$(printf '%s\n' src-tauri/target/"$TARGET"/release/bundle/dmg/*.dmg | head -n 1)"
+          test -f "$dmg"
+          xcrun stapler validate "$dmg"
+          helper_team="$(
+            codesign -dv --verbose=4 "$app_bundle/Contents/MacOS/oniongate-helper" 2>&1 |
+              awk -F= '/^TeamIdentifier=/{print $2}'
+          )"
+          test "$helper_team" = "$APPLE_TEAM_ID"
+      - name: Verify Linux bundles
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          compgen -G "src-tauri/target/$TARGET/release/bundle/appimage/*.AppImage" >/dev/null
+          compgen -G "src-tauri/target/$TARGET/release/bundle/deb/*.deb" >/dev/null
+          compgen -G "src-tauri/target/$TARGET/release/bundle/rpm/*.rpm" >/dev/null
 
-  attest:
-    needs: build
-    runs-on: ubuntu-latest
+          deb="$(printf '%s\n' src-tauri/target/"$TARGET"/release/bundle/deb/*.deb | head -n 1)"
+          rm -rf "$RUNNER_TEMP/oniongate-deb"
+          dpkg-deb -x "$deb" "$RUNNER_TEMP/oniongate-deb"
+          test -x "$RUNNER_TEMP/oniongate-deb/usr/bin/oniongate-helper"
+          test -x "$RUNNER_TEMP/oniongate-deb/usr/bin/oniongate"
+
+          appimage="$(
+            printf '%s\n' src-tauri/target/"$TARGET"/release/bundle/appimage/*.AppImage |
+              head -n 1
+          )"
+          chmod +x "$appimage"
+          (
+            cd "$RUNNER_TEMP"
+            rm -rf squashfs-root
+            "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null
+            test -x squashfs-root/usr/bin/oniongate-helper
+            test -x squashfs-root/usr/bin/oniongate
+          )
+      - name: Verify Windows bundles and signatures
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          $installer = Get-ChildItem "src-tauri/target/$env:TARGET/release/bundle/nsis" -Filter *.exe |
+            Select-Object -First 1
+          if (-not $installer) { throw "No NSIS setup executable was generated" }
+          if ($env:WINDOWS_CERTIFICATE) {
+            $signature = Get-AuthenticodeSignature $installer.FullName
+            if ($signature.Status -ne "Valid") {
+              throw "Invalid Authenticode signature on $($installer.FullName): $($signature.Status)"
+            }
+          }
+
+          $extract = Join-Path $env:RUNNER_TEMP "oniongate-nsis"
+          Remove-Item $extract -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $extract | Out-Null
+          & 7z x $installer.FullName "-o$extract" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "NSIS extraction failed: $LASTEXITCODE" }
+          $helper = Get-ChildItem $extract -Recurse -Filter oniongate-helper.exe
+          if (-not $helper) { throw "NSIS setup does not contain oniongate-helper.exe" }
+
+  metadata:
+    name: Checksums, SBOMs, and provenance
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
-      - name: Generate source SBOMs
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - name: Download built release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release-assets
+          gh release download "$GITHUB_REF_NAME" --dir release-assets --clobber
+          rm -f release-assets/SHA256SUMS release-assets/SHA256SUMS.sig
+          rm -f release-assets/*.cdx.json
+      - name: Verify updater manifest covers every target
+        run: |
+          jq -e '
+            .platforms
+            | has("darwin-aarch64")
+              and has("darwin-x86_64")
+              and has("linux-x86_64")
+              and has("windows-x86_64")
+          ' release-assets/latest.json >/dev/null
+      - name: Generate source and sidecar SBOMs
         run: |
           cargo install cargo-cyclonedx --locked
           cargo cyclonedx --manifest-path src-tauri/Cargo.toml --format json
           npx --yes @cyclonedx/cyclonedx-npm --output-file npm.cdx.json
+          node scripts/generate-sidecar-sbom.mjs sidecars.cdx.json
+          cp src-tauri/*.cdx.json release-assets/
+          cp npm.cdx.json sidecars.cdx.json release-assets/
+      - name: Generate and sign checksums
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          (
+            cd release-assets
+            sha256sum -- * | LC_ALL=C sort -k2 > SHA256SUMS
+          )
+          npm run --silent tauri -- signer sign release-assets/SHA256SUMS
+      - name: Upload release metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            release-assets/SHA256SUMS \
+            release-assets/SHA256SUMS.sig \
+            release-assets/*.cdx.json \
+            --clobber
+      - name: Attest release assets
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: release-assets/*
       - uses: actions/upload-artifact@v4
         with:
-          name: source-sboms
-          path: |
-            src-tauri/*.cdx.json
-            npm.cdx.json
+          name: release-evidence-${{ github.ref_name }}
+          if-no-files-found: error
+          path: release-assets/

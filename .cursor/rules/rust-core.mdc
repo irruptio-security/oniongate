@@ -17,10 +17,11 @@ sidecars (tor, lyrebird, sing-box).
 - `proxy/` reversible OS SOCKS configuration
 - `firewall/` leak guard + live platform state
 - `session.rs` / `session_guard.rs` persisted mutation journal + crash recovery
-- `onion_service/` ephemeral v3 onion service lifecycle
+- `onion_service/` temporary + permanent v3 onion site lifecycle (Onion Host)
 - `verify.rs`, `workstation/` leak and workstation-posture diagnostics
 - `harden/` explicit, reversible host settings (outside the protection boundary)
-- `commands.rs` Tauri commands; `cli.rs` the `tor-socks-cli`; `helper/` privileged helper
+- `commands.rs` Tauri commands; `cli.rs` the clap-based `oniongate` CLI;
+  `helper/` privileged helper
 
 ## Rules
 

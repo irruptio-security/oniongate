@@ -1,8 +1,8 @@
 //! Install / uninstall / status for the privileged helper.
 //!
-//! Each platform registers a persistent privileged service with a SINGLE
-//! elevation prompt at install time; afterwards the app talks to it over IPC
-//! with no further prompts:
+//! Each platform can register a persistent privileged service with a SINGLE
+//! elevation prompt at install time; supported typed operations then use IPC
+//! without another prompt:
 //! - macOS: a launchd system daemon (`launchctl bootstrap`).
 //! - Linux: a systemd system service.
 //! - Windows: a Windows service (SCM).
@@ -115,11 +115,11 @@ fn macos_status() -> HelperStatus {
         installed,
         running,
         detail: if running {
-            "Helper installed and running — privileged actions apply without prompts".into()
+            "Helper installed and running — kill-switch changes apply without prompts".into()
         } else if installed {
             "Helper installed but not running (it starts at boot/login)".into()
         } else {
-            "Helper not installed — privileged actions prompt for your password".into()
+            "Helper not installed — kill-switch changes use the administrator prompt".into()
         },
     }
 }
@@ -197,11 +197,11 @@ fn linux_status() -> HelperStatus {
         installed,
         running,
         detail: if running {
-            "Helper installed and running — privileged actions apply without prompts".into()
+            "Helper installed and running — kill-switch changes apply without prompts".into()
         } else if installed {
             "Helper installed but not running".into()
         } else {
-            "Helper not installed — privileged actions prompt via pkexec/sudo".into()
+            "Helper not installed — kill-switch changes prompt via pkexec/sudo".into()
         },
     }
 }
@@ -266,11 +266,12 @@ fn windows_status() -> HelperStatus {
         installed,
         running,
         detail: if running {
-            "Helper service installed and running — privileged actions apply without prompts".into()
+            "Helper service installed and running — kill-switch changes apply without prompts"
+                .into()
         } else if installed {
             "Helper service installed but not running".into()
         } else {
-            "Helper not installed — privileged actions prompt via UAC".into()
+            "Helper not installed — kill-switch changes prompt via UAC".into()
         },
     }
 }

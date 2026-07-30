@@ -80,6 +80,16 @@ fn warn(id: &str, label: &str, detail: impl Into<String>) -> VerificationCheck {
     }
 }
 
+fn unverifiable(label: &str, detail: impl Into<String>) -> VerificationCheck {
+    VerificationCheck {
+        id: "ip_separation".into(),
+        label: label.into(),
+        status: "warn".into(),
+        detail: detail.into(),
+        remediation: None,
+    }
+}
+
 fn ipv6_default_route() -> bool {
     #[cfg(target_os = "macos")]
     let result = Command::new("route")
@@ -118,6 +128,14 @@ pub async fn run() -> LeakReport {
         },
     ));
     match (&direct, &tor) {
+        (Ok(default_path), Ok(tor_path)) if tun => checks.push(unverifiable(
+            "Default/Tor egress under TUN",
+            if default_path == tor_path {
+                "The no-proxy request and explicit Tor request used the same exit. TUN intentionally prevents a safe direct-IP baseline."
+            } else {
+                "Both requests succeeded, but TUN captures the no-proxy path; different Tor circuits can use different exits, so direct-IP separation is not measurable safely."
+            },
+        )),
         (Ok(direct), Ok(tor)) => checks.push(check(
             "ip_separation",
             "Direct/Tor IP separation",
@@ -135,28 +153,53 @@ pub async fn run() -> LeakReport {
         )),
     }
 
-    checks.push(check(
-        "dns",
-        "Resolve through Tor",
-        !settings.remote_dns || crate::tor::dns_reachable(),
-        if settings.remote_dns {
-            "Tor's local UDP DNSPort responded"
-        } else {
-            "Disabled by user; proxy applications must manage DNS explicitly"
-        },
-    ));
-    checks.push(check(
-        "udp_quic",
-        "UDP/QUIC containment",
-        tun || firewall.active,
-        if firewall.active && firewall.verified_live {
-            "Live firewall rules were inspected"
-        } else if tun {
-            "TUN policy blocks UDP/QUIC"
-        } else {
-            "No active TUN or verified firewall rule"
-        },
-    ));
+    let dns_reachable = crate::tor::dns_reachable();
+    checks.push(if settings.remote_dns {
+        check(
+            "dns",
+            "Resolve through Tor",
+            dns_reachable,
+            if dns_reachable {
+                "Tor's local UDP DNSPort responded"
+            } else {
+                "Resolve through Tor is enabled, but Tor's DNSPort did not respond"
+            },
+        )
+    } else {
+        warn(
+            "dns",
+            "Resolve through Tor",
+            "Disabled by user; OnionGate cannot verify DNS containment for proxy applications",
+        )
+    });
+    checks.push(if tun {
+        check(
+            "udp_quic",
+            "UDP/QUIC containment",
+            true,
+            "The live TUN policy blocks UDP/QUIC",
+        )
+    } else if firewall.active && firewall.verified_live {
+        check(
+            "udp_quic",
+            "UDP/QUIC containment",
+            true,
+            "Live OnionGate firewall rules were inspected",
+        )
+    } else if firewall.marker_active {
+        warn(
+            "udp_quic",
+            "UDP/QUIC containment",
+            "A kill-switch marker exists, but the live firewall rule could not be verified",
+        )
+    } else {
+        check(
+            "udp_quic",
+            "UDP/QUIC containment",
+            false,
+            "No active TUN or verified firewall rule",
+        )
+    });
 
     let ipv6 = ipv6_default_route();
     checks.push(if !ipv6 || tun {
@@ -191,7 +234,11 @@ pub async fn run() -> LeakReport {
         },
     ));
     checks.push(
-        if settings.session_guard && settings.app_routing_policy == "only" {
+        if settings.session_guard
+            && settings.split_tunnel
+            && settings.app_routing_policy == "only"
+            && !settings.route_apps.is_empty()
+        {
             check(
                 "session_guard",
                 "Session Guard",
@@ -210,7 +257,7 @@ pub async fn run() -> LeakReport {
     let recovery = crate::session::recovery_status();
     checks.push(check(
         "recovery",
-        "Kill-switch recovery",
+        "Crash recovery state",
         !recovery.needed,
         "Live firewall/TUN/proxy state was compared with the crash-recovery journal",
     ));

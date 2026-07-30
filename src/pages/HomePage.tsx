@@ -88,10 +88,10 @@ export function HomePage({
       .catch(() => setRecovery(null));
   }, [torOn, busy]);
 
-  const badgeVariant = !torOn
-    ? "default"
-    : proxyOn || status?.tun.running
-      ? "success"
+  const badgeVariant = protectionLabel.startsWith("Protected")
+    ? "success"
+    : protectionLabel === "Disconnected"
+      ? "default"
       : "warn";
   const locale = effectiveLocale(settings?.locale);
   const t = (key: Parameters<typeof translate>[1]) => translate(locale, key);

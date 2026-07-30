@@ -3,8 +3,10 @@
 
 .PHONY: help setup install deps \
 	start dev run build build-frontend preview \
-	check typecheck test lint fmt fmt-check audit \
-	clean clean-rust clean-deps
+	icons \
+	check typecheck test lint fmt fmt-check audit release-check release-bundle-local sidecar-sbom \
+	docs docs-build docs-preview \
+	clean clean-rust clean-deps clean-docs
 
 CARGO_MANIFEST := src-tauri/Cargo.toml
 NPM ?= npm
@@ -50,6 +52,12 @@ build: deps ## Build a release app bundle (Tauri)
 build-frontend: ## Typecheck and build the Vite frontend only
 	$(NPM) run build
 
+icons: ## Clean logo transparency and regenerate platform icon bundles (macOS)
+	@command -v swift >/dev/null || { echo "Swift is required for icon generation"; exit 1; }
+	swift scripts/generate-icons.swift
+	$(NPM) run tauri -- icon public/logo.png
+	rm -rf src-tauri/icons/android src-tauri/icons/ios
+
 # ---------------------------------------------------------------------------
 # Quality
 # ---------------------------------------------------------------------------
@@ -76,6 +84,28 @@ fmt-check: ## Check Rust formatting without writing
 audit: ## cargo audit against src-tauri/Cargo.lock
 	cargo audit --file src-tauri/Cargo.lock
 
+release-check: ## Validate version synchronization and CHANGELOG (VERSION=x.y.z optional)
+	node scripts/check-release.mjs $(VERSION)
+
+release-bundle-local: ## Build and verify an unsigned bundle for this host
+	bash scripts/build-release-local.sh
+
+sidecar-sbom: ## Generate CycloneDX inventory for pinned runtime archives
+	node scripts/generate-sidecar-sbom.mjs sidecars.cdx.json
+
+# ---------------------------------------------------------------------------
+# Documentation site
+# ---------------------------------------------------------------------------
+
+docs: ## Serve the documentation site with hot reload
+	$(NPM) run docs:dev
+
+docs-build: ## Build the documentation site into docs/.vitepress/dist
+	$(NPM) run docs:build
+
+docs-preview: docs-build ## Preview the built documentation site
+	$(NPM) run docs:preview
+
 # ---------------------------------------------------------------------------
 # Clean
 # ---------------------------------------------------------------------------
@@ -90,3 +120,6 @@ clean-deps: ## Remove downloaded sidecars and the deps cache
 	rm -rf .deps-cache
 	find src-tauri/binaries -mindepth 1 -maxdepth 1 ! -name 'README.md' -exec rm -rf {} +
 	rm -rf src-tauri/resources/runtime
+
+clean-docs: ## Remove the documentation site build output and cache
+	rm -rf docs/.vitepress/dist docs/.vitepress/cache

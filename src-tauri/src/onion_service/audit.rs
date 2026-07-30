@@ -4,7 +4,19 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use super::OnionProject;
+/// What `audit` needs to know about a site, regardless of whether it is a
+/// temporary control-port service or a permanent `HiddenServiceDir` site.
+pub struct AuditTarget<'a> {
+    pub service_id: &'a str,
+    pub hostname: &'a str,
+    pub local_port: u16,
+    pub virtual_port: u16,
+    /// Present only when OnionGate still holds the credential in memory, which
+    /// is the case for temporary private sites and never for permanent ones.
+    pub client_credential: Option<&'a str>,
+    /// True when the service requires authorization we cannot supply.
+    pub auth_required_without_credential: bool,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListenerAudit {
@@ -88,13 +100,32 @@ pub fn inspect_listener(port: u16) -> ListenerAudit {
     }
 }
 
-pub async fn audit(project: &OnionProject) -> Result<OnionAudit, String> {
-    if let Some(credential) = &project.client_credential {
-        super::control::authorize_client(&project.service_id, credential).await?;
+pub async fn audit(target: &AuditTarget<'_>) -> Result<OnionAudit, String> {
+    let mut warnings = Vec::new();
+
+    // A site whose authorization keys we never held cannot be self-tested: Tor
+    // cannot even fetch the descriptor without a client credential.
+    if target.auth_required_without_credential {
+        warnings.push(
+            "Client authorization is on and OnionGate does not keep credentials, so the \
+             descriptor cannot be fetched from here. Test with a client that holds one."
+                .into(),
+        );
+        return Ok(OnionAudit {
+            listener: inspect_listener(target.local_port),
+            published: false,
+            latency_ms: None,
+            http_status: None,
+            security_headers: Vec::new(),
+            warnings,
+        });
+    }
+
+    if let Some(credential) = target.client_credential {
+        super::control::authorize_client(target.service_id, credential).await?;
     }
     let connectivity =
-        crate::tor::onion::test_connectivity(&project.hostname, project.virtual_port).await?;
-    let mut warnings = Vec::new();
+        crate::tor::onion::test_connectivity(target.hostname, target.virtual_port).await?;
     let mut status = None;
     let mut security_headers = Vec::new();
     if connectivity.reachable {
@@ -110,7 +141,7 @@ pub async fn audit(project: &OnionProject) -> Result<OnionAudit, String> {
             .build()
             .map_err(|e| e.to_string())?;
         if let Ok(response) = client
-            .get(format!("http://{}", project.hostname))
+            .get(format!("http://{}", target.hostname))
             .send()
             .await
         {
@@ -133,7 +164,7 @@ pub async fn audit(project: &OnionProject) -> Result<OnionAudit, String> {
         warnings.push("Onion descriptor may still be publishing; retry shortly".into());
     }
     Ok(OnionAudit {
-        listener: inspect_listener(project.local_port),
+        listener: inspect_listener(target.local_port),
         published: connectivity.reachable,
         latency_ms: connectivity.latency_ms,
         http_status: status,

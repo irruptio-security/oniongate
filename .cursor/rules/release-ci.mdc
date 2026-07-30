@@ -11,7 +11,19 @@ alwaysApply: false
   toolchain pinned in `.nvmrc`.
 - Release artifacts must be built by CI from a tag, signed + notarized (macOS),
   checksummed (`SHA256SUMS`), and shipped with CycloneDX SBOMs and license /
-  corresponding-source links. Follow the full checklist in `RELEASE.md`.
+  corresponding-source links. Follow the full checklist in
+  `docs/reference/release.md`.
+- Before tagging, invoke the project `release-changelog` skill. The release
+  commit must synchronize npm/Cargo/Tauri versions and contain a dated
+  `CHANGELOG.md` section; CI enforces both.
+- Release tags must point to commits reachable from `main` or `staging`.
+  Staging-origin releases are always prereleases; feature branches never build
+  downloadable artifacts.
+- Keep the release matrix serialized while `tauri-action` merges platform
+  entries into `latest.json`. Every release must include macOS ARM64/Intel,
+  Linux x86_64, Windows x86_64, and the signed privileged helper.
+- CI creates drafts only. Publishing, marking Latest, and promoting a Windows
+  build from experimental require human artifact/install verification.
 - Never put credential values in code, workflows, commits, or logs — only GitHub
   Actions secrets (see `RELEASE_SECRETS.md`). The Tauri updater private key and
   password must be backed up offline; losing them permanently breaks updates.

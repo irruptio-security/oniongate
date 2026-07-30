@@ -142,8 +142,9 @@ pub async fn teardown_session(
         }
     }
 
-    // 5) Ephemeral onion services (destroy before the control port closes)
-    crate::onion_service::stop_all().await;
+    // 5) Temporary onion sites (destroy before the control port closes).
+    //    Permanent sites live in torrc and are meant to survive this.
+    crate::onion_service::stop_all_temporary().await;
 
     // 6) Tor
     {
