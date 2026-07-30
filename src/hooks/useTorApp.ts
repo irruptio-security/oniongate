@@ -256,6 +256,18 @@ export function useTorApp() {
       return result.message;
     });
 
+  // Changing the exit country pins ExitNodes and rotates the circuit (NEWNYM),
+  // so refresh the IP once the new circuit settles to reflect the new location.
+  const applyExitCountry = (country: string) =>
+    void run(async () => {
+      const result = await invoke<NewIdentityResult>("set_exit_country", {
+        country,
+      });
+      setIps(result.ips);
+      await refreshSettings();
+      return result.message;
+    });
+
   const fetchBridges = (transport?: string) =>
     void run(async () => {
       const t = transport ?? scanTransport;
@@ -368,6 +380,7 @@ export function useTorApp() {
     toggleProxy,
     saveSettings,
     newIdentity,
+    applyExitCountry,
     fetchBridges,
     saveBridges,
     scanBridges,

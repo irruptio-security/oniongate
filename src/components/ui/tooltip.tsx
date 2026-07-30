@@ -17,6 +17,34 @@ export function TooltipProvider({
   );
 }
 
+/** Lightweight label tooltip (used for collapsed sidebar items). */
+export function Tooltip({
+  label,
+  side = "right",
+  children,
+}: {
+  label: React.ReactNode;
+  side?: "top" | "right" | "bottom" | "left";
+  children: React.ReactNode;
+}) {
+  return (
+    <TooltipPrimitive.Root>
+      <TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger>
+      <TooltipPrimitive.Portal>
+        <TooltipPrimitive.Content
+          side={side}
+          sideOffset={8}
+          collisionPadding={12}
+          className="z-50 rounded-lg border border-white/10 bg-rail px-2.5 py-1 text-xs font-medium text-rail-ink shadow-xl animate-[fade-in_120ms_ease-out]"
+        >
+          {label}
+          <TooltipPrimitive.Arrow className="fill-[var(--color-rail)]" />
+        </TooltipPrimitive.Content>
+      </TooltipPrimitive.Portal>
+    </TooltipPrimitive.Root>
+  );
+}
+
 export type TipTone = "default" | "ok" | "warn" | "danger" | "accent";
 
 const chipTone: Record<TipTone, string> = {

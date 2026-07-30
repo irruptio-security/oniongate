@@ -1,0 +1,34 @@
+---
+description: Rust core architecture, module map, and invariants
+globs: src-tauri/src/**/*.rs
+alwaysApply: false
+---
+
+# Rust core (`src-tauri/src`)
+
+Trust tiers: UI → **Core** (settings, Tor control, policy, diagnostics, session)
+→ platform adapters (proxy / TUN / firewall / elevation / host probes) → pinned
+sidecars (tor, lyrebird, sing-box).
+
+## Module map
+
+- `tor/` managed Tor, control protocol, bridges, transports
+- `tun/` sing-box TUN + per-app route generation
+- `proxy/` reversible OS SOCKS configuration
+- `firewall/` leak guard + live platform state
+- `session.rs` / `session_guard.rs` persisted mutation journal + crash recovery
+- `onion_service/` ephemeral v3 onion service lifecycle
+- `verify.rs`, `workstation/` leak and workstation-posture diagnostics
+- `harden/` explicit, reversible host settings (outside the protection boundary)
+- `commands.rs` Tauri commands; `cli.rs` the `tor-socks-cli`; `helper/` privileged helper
+
+## Rules
+
+- Put every network mutation behind a typed platform API; add rollback +
+  startup-recovery for each privileged mutation.
+- Add tests for torrc, control-protocol, routing, firewall, and persistence changes.
+- SOCKS resolution uses `socks5h`; TUN DNS uses Tor's `DNSPort`; block unsupported
+  UDP/QUIC in guarded modes instead of tunnelling it.
+- Never write onion keys, client credentials, or control cookies to logs or SQLite.
+- New Tauri commands must be registered in `lib.rs` `invoke_handler`; when a change
+  affects protected state, mirror it in the CLI so GUI/CLI stay in parity.

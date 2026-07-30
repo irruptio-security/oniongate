@@ -1,13 +1,13 @@
-export type Tab = "home" | "apps" | "onion-lab" | "verify" | "system";
+export type Tab =
+  | "home"
+  | "apps"
+  | "onion-lab"
+  | "verify"
+  | "harden"
+  | "system";
 
 /** Sub-views within the System tab (used for deep-linking from other pages). */
-export type SystemView =
-  | "audit"
-  | "persistence"
-  | "artifact"
-  | "harden"
-  | "settings"
-  | "logs";
+export type SystemView = "audit" | "persistence" | "settings" | "logs";
 
 export type ProxyStatus = {
   supported: boolean;

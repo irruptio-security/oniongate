@@ -1,32 +1,65 @@
-import { Home, FlaskConical, ShieldCheck, Shield, Sparkles } from "lucide-react";
+import { useState } from "react";
+import {
+  FlaskConical,
+  Home,
+  Lock,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Shield,
+  ShieldCheck,
+  Sparkles,
+  type LucideIcon,
+} from "lucide-react";
 import { useTorApp } from "@/hooks/useTorApp";
 import { ConnectPage } from "@/pages/ConnectPage";
 import { AppsPage } from "@/pages/AppsPage";
 import { VerifyPage } from "@/pages/VerifyPage";
 import { OnionLabPage } from "@/pages/OnionLabPage";
 import { SystemPage } from "@/pages/SystemPage";
+import { HardenPage } from "@/pages/HardenPage";
 import { Flash } from "@/components/Flash";
 import { SetupWizard } from "@/components/SetupWizard";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { OnionIcon } from "@/OnionIcon";
+import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 import type { Tab } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { effectiveLocale } from "@/lib/i18n";
 import { startWindowDrag } from "@/lib/drag";
+import {
+  readSidebarCollapsed,
+  setWindowCollapsed,
+  SIDEBAR_STORAGE_KEY,
+} from "@/lib/window";
 
-const NAV: { id: Tab; label: string; icon: typeof Home }[] = [
+const NAV: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: "home", label: "Connect", icon: Home },
   { id: "apps", label: "Apps", icon: Sparkles },
   { id: "onion-lab", label: "Onion Lab", icon: FlaskConical },
   { id: "verify", label: "Verify", icon: ShieldCheck },
+  { id: "harden", label: "OS Hardening", icon: Lock },
   { id: "system", label: "System", icon: Shield },
 ];
 
 export default function App() {
   const app = useTorApp();
-  const os = app.detect?.os;
   const locale = effectiveLocale(app.settings?.locale);
   const showWizard = !!app.settings && !app.settings.setup_complete;
+
+  const [collapsed, setCollapsed] = useState<boolean>(() =>
+    readSidebarCollapsed(),
+  );
+
+  const toggleSidebar = () =>
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SIDEBAR_STORAGE_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore storage errors */
+      }
+      // Shrink/grow the whole window, not just the rail.
+      void setWindowCollapsed(next);
+      return next;
+    });
 
   return (
     <TooltipProvider>
@@ -35,73 +68,98 @@ export default function App() {
         className="flex h-screen min-h-0 w-full overflow-hidden bg-transparent"
       >
         {showWizard ? <SetupWizard app={app} /> : null}
-        <aside className="flex w-[200px] shrink-0 flex-col border-r border-line/70 bg-canvas/55 backdrop-blur-[2px]">
+        <aside
+          className={cn(
+            "relative z-20 flex shrink-0 flex-col rail-surface text-rail-ink border-r border-white/[0.06] shadow-[8px_0_28px_-20px_rgba(0,0,0,0.8)] transition-[width] duration-200 ease-out",
+            collapsed ? "w-[88px]" : "w-56",
+          )}
+        >
           <div
             data-tauri-drag-region
             onMouseDown={startWindowDrag}
-            className="flex items-center gap-2.5 px-4 pb-3 pt-14"
+            className={cn(
+              "flex items-center gap-2.5 pb-4 pt-14",
+              collapsed ? "justify-center px-0" : "px-4",
+            )}
           >
-            <OnionIcon className="h-7 w-7 text-onion" />
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold tracking-tight">
+            <img
+              src="/logo.png"
+              alt="OnionGate"
+              className={cn(
+                "shrink-0 rounded-xl shadow-sm",
+                collapsed ? "h-12 w-12" : "h-10 w-10",
+              )}
+              draggable={false}
+            />
+            {!collapsed ? (
+              <div className="truncate text-[15px] font-semibold tracking-tight text-rail-ink">
                 OnionGate
               </div>
-              <div className="truncate text-[10px] text-muted">
-                Tor gateway
-              </div>
-            </div>
+            ) : null}
           </div>
+
           <nav
-            className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-3"
+            className="flex flex-1 flex-col gap-1 overflow-y-auto px-2.5 pb-3"
             aria-label="Primary"
           >
-            {NAV.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => app.setTab(id)}
-                className={cn(
-                  "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                  app.tab === id
-                    ? "bg-panel-2 text-ink"
-                    : "text-muted hover:bg-panel-2/60 hover:text-ink",
-                )}
-              >
-                <Icon className="h-4 w-4 shrink-0" strokeWidth={1.8} />
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <span className="truncate">{label}</span>
-                  {id === "system" && (app.status?.persistence_changes ?? 0) > 0 ? (
-                    <span className="rounded bg-warn/15 px-1 text-[9px] font-semibold text-warn">
-                      {app.status?.persistence_changes}
+            {NAV.map(({ id, label, icon: Icon }) => {
+              const active = app.tab === id;
+              const badge =
+                id === "system" && (app.status?.persistence_changes ?? 0) > 0
+                  ? app.status?.persistence_changes
+                  : null;
+              const button = (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => app.setTab(id)}
+                  aria-label={label}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "relative flex items-center rounded-xl text-sm font-medium transition-colors",
+                    collapsed
+                      ? "h-12 w-12 justify-center self-center"
+                      : "gap-3 px-3 py-2.5",
+                    active
+                      ? "bg-rail-active text-white shadow-[0_6px_16px_-6px_rgba(124,58,237,0.6)]"
+                      : "text-rail-muted hover:bg-rail-2 hover:text-rail-ink",
+                  )}
+                >
+                  <Icon
+                    className={cn("shrink-0", collapsed ? "h-6 w-6" : "h-5 w-5")}
+                    strokeWidth={1.9}
+                  />
+                  {!collapsed ? (
+                    <span className="flex min-w-0 flex-1 items-center justify-between gap-1.5">
+                      <span className="truncate">{label}</span>
+                      {badge != null ? (
+                        <span className="rounded bg-warn/20 px-1 text-[9px] font-semibold text-warn-strong">
+                          {badge}
+                        </span>
+                      ) : null}
                     </span>
+                  ) : badge != null ? (
+                    <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-warn ring-2 ring-rail" />
                   ) : null}
-                  {id === "system" && os === "macos" ? (
-                    <span
-                      className="shrink-0 text-[11px] text-muted"
-                      title="macOS"
-                      aria-label="macOS"
-                    >
-                      {"\uF8FF"}
-                    </span>
-                  ) : null}
-                  {id === "system" && os === "linux" ? (
-                    <span
-                      className="shrink-0 rounded border border-line px-1 text-[9px] font-semibold uppercase tracking-wide text-muted"
-                      title="Linux"
-                      aria-label="Linux"
-                    >
-                      Linux
-                    </span>
-                  ) : null}
-                </span>
-              </button>
-            ))}
+                </button>
+              );
+              return collapsed ? (
+                <Tooltip key={id} label={label} side="right">
+                  {button}
+                </Tooltip>
+              ) : (
+                button
+              );
+            })}
           </nav>
-          <div className="border-t border-line px-4 py-3">
-            <p className="truncate text-[10px] text-muted">
-              {app.protectionLabel}
-            </p>
-          </div>
+
+          {!collapsed ? (
+            <div className="mt-auto border-t border-white/[0.06] px-3.5 py-3">
+              <p className="truncate text-[10px] text-rail-muted">
+                {app.protectionLabel}
+              </p>
+            </div>
+          ) : null}
         </aside>
 
         <main className="relative min-h-0 min-w-0 flex-1 overflow-y-auto">
@@ -111,6 +169,18 @@ export default function App() {
             className="absolute inset-x-0 top-0 z-10 h-11"
             aria-hidden
           />
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className="absolute left-3 top-2.5 z-20 flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-panel-2 hover:text-ink"
+          >
+            {collapsed ? (
+              <PanelLeftOpen className="h-[18px] w-[18px]" strokeWidth={1.9} />
+            ) : (
+              <PanelLeftClose className="h-[18px] w-[18px]" strokeWidth={1.9} />
+            )}
+          </button>
           <Flash
             message={app.message}
             error={app.error}
@@ -121,6 +191,7 @@ export default function App() {
             {app.tab === "apps" ? <AppsPage app={app} /> : null}
             {app.tab === "onion-lab" ? <OnionLabPage app={app} /> : null}
             {app.tab === "verify" ? <VerifyPage app={app} /> : null}
+            {app.tab === "harden" ? <HardenPage app={app} /> : null}
             {app.tab === "system" ? <SystemPage app={app} /> : null}
           </div>
         </main>

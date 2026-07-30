@@ -1,145 +1,101 @@
-# OnionGate
+<p align="center">
+  <img src="public/logo.png" alt="OnionGate" width="120" height="120" />
+</p>
 
-**Route apps through isolated Tor circuits, expose localhost as a private onion
-service, and verify that the workstation is not leaking.**
+<h1 align="center">OnionGate</h1>
 
-OnionGate is a GPL-3.0 Tor Workstation Toolkit for macOS, Linux, and an
-experimental signed Windows adapter. It combines managed Tor, per-app routing,
-an ephemeral Onion Lab, crash recovery, leak verification, and focused host
-posture in one Tauri desktop application.
+<p align="center">
+  <b>A Tor workstation toolkit for macOS, Linux, and Windows (experimental).</b>
+</p>
 
-> OnionGate is not a VPN, Tor Browser, Tails, Whonix, an antivirus, or a general
-> application firewall. It does not prevent browser fingerprinting or global
-> traffic correlation. Read [THREAT_MODEL.md](THREAT_MODEL.md) before relying on
-> it for sensitive work.
+OnionGate is a desktop app that routes individual applications through isolated
+Tor circuits, turns a local port into a private onion service, and verifies that
+your machine isn't leaking outside Tor. It bundles and manages Tor for you — no
+terminal required.
 
-## Three things to try
+> OnionGate is **not** a VPN, Tor Browser, Tails, or Whonix. It does not stop
+> browser fingerprinting or global traffic correlation. Read the
+> [threat model](THREAT_MODEL.md) before relying on it for sensitive work.
 
-### 1. Give two apps separate circuits
+## What you can do
 
-Open **Apps**, choose stable application bundles or executables, select **Only
-selected via Tor**, enable TUN, and connect. OnionGate gives each app distinct
-SOCKS authentication on Tor's `IsolateSOCKSAuth` listener. Rotate one app's
-credentials without changing its stable bundle/path/signing identity.
+- **Route apps through Tor** — give each app its own isolated circuit, with a
+  fail-closed Session Guard that suspends protected apps instead of leaking if
+  Tor drops.
+- **Host a private onion** — expose `127.0.0.1:<port>` as an ephemeral v3 onion
+  service with client authorization and a QR handoff, then destroy it (and its
+  key) in one click. See the [Onion Lab guide](docs/ONION_LAB.md).
+- **Verify you're safe** — run leak checks (DNS, IPv6, UDP/QUIC, per-app policy)
+  and export a redacted report. Your public IP is compared in memory, never
+  stored.
 
-### 2. Turn localhost into a private onion
+## OnionGate vs OnionHop
 
-Start a server bound to `127.0.0.1:3000`, open **Onion Lab**, and create a
-private ephemeral service. OnionGate rejects wildcard listeners, discards the
-service key on stop, generates v3 client authorization, and provides a QR/client
-credential. Use **Test & audit** to check publication, latency, HTTP status, and
-security headers.
+OnionHop makes it easy to send your traffic through Tor. OnionGate goes further
+for people who need stronger guarantees:
 
-### 3. Produce a redacted verification report
-
-Open **Verify** and run the leak verifier. It checks Tor/direct egress
-separation, Tor DNS, IPv6, UDP/QUIC containment, selected-app policy, Session
-Guard, and crash-recovery state. Public IP values are compared in memory and are
-not stored in SQLite or exported.
-
-## Product pillars
-
-- **Route:** managed Tor, trustworthy Smart Connect fallback, bridges,
-  TUN/proxy modes, stable app identities, isolated circuits, and Session Guard.
-- **Onion Lab:** secure loopback-to-v3-onion projects for local development,
-  client authorization, QR handoff, audits, and explicit destruction.
-- **Verify:** leak reports, live firewall inspection, emergency restoration,
-  macOS posture, persistence baselines, and artifact inspection.
-
-Optional **Harden** actions remain secondary, reversible, and clearly separated
-from the core protection boundary.
-
-## Why it is different
-
-- **Tor Browser** remains the right choice for browser fingerprinting defenses.
-  OnionGate focuses on non-browser applications and workstation diagnostics.
-- **OnionHop** provides convenient Tor routing. OnionGate adds stable signed app
-  identities, per-app `IsolateSOCKSAuth`, fail-closed Session Guard, a persisted
-  mutation journal, and verifiable reports.
-- **OnionShare** is excellent for chat and file sharing. OnionGate's Onion Lab
-  targets local web/service development and deployment checks instead.
-- **Tails/Whonix** provide stronger operating-system isolation. OnionGate is a
-  practical toolkit for an existing workstation, not a replacement.
-- **LuLu, BlockBlock, OverSight, and KnockKnock** remain specialist macOS tools.
-  OnionGate detects and links to official installations instead of silently
-  cloning or bundling them.
-
-## Security behavior
-
-- SOCKS hostname resolution uses `socks5h`; TUN DNS uses Tor's local UDP
-  `DNSPort`.
-- Smart Connect tries direct Tor, user-supplied BridgeDB lines, then bundled
-  Snowflake. It does not consume untrusted GitHub bridge feeds.
-- Every proxy, TUN, firewall, Tor, and transport mutation is journaled for
-  startup recovery.
-- Firewall status comes from live pf/nftables/Windows Firewall inspection, not
-  only marker files.
-- Onion keys and client credentials are never written to logs or SQLite.
-- Sidecar archives are pinned in `scripts/dependencies.sha256`.
-
-See [SECURITY.md](SECURITY.md), [THREAT_MODEL.md](THREAT_MODEL.md),
-[ARCHITECTURE.md](ARCHITECTURE.md), [PRIVACY.md](PRIVACY.md), and
-[RELEASE.md](RELEASE.md). Maintainers can use the
-[demo script](docs/DEMO.md) and [comparison guide](docs/COMPARISON.md).
+- **Per-app isolation** — a separate Tor circuit per application, not one shared
+  route.
+- **Fail-closed Session Guard** — protected apps stop rather than fall back to a
+  direct connection.
+- **Crash recovery** — every network change is journaled and restored after a
+  crash or interrupted disconnect.
+- **Onion Lab** — build and audit private onion services for local development.
+- **Verifiable reports** — redacted leak reports you can inspect and export.
 
 ## Install
 
 Release builds bundle Tor, lyrebird, and sing-box.
 
 1. Download a signed release and its `SHA256SUMS`.
-2. Verify the checksum and platform signature/notarization.
-3. Open OnionGate and choose a preset: Everyday, Censored Network, Public
-   Wi-Fi, Maximum Isolation, or Developer Lab.
-4. Run **Verify** after connecting.
-
-No stable release should be published until the release checklist and
-fresh-machine recovery tests pass.
+2. Verify the checksum and platform signature.
+3. Open OnionGate, pick a preset, and run **Verify** after connecting.
 
 ## Develop
 
-Requirements: Node.js 24.18 Active LTS (see `.nvmrc`), Rust stable, Tauri
-platform prerequisites, `curl`, `tar`, and `unzip` on Windows.
+Requires Node.js (see `.nvmrc`), Rust stable, Make, and the Tauri prerequisites
+for your OS. Prefer the Makefile targets (`make help` lists them all).
 
 ```bash
-npm ci
-npm run deps
-npm run check
-npm run tauri dev
+make setup          # npm ci + download/verify Tor / sing-box sidecars
+make start          # tauri dev
 ```
 
-Build:
+Build a release bundle from source:
 
 ```bash
-npm run deps
-npm run tauri build
+make build
 ```
 
-CLI:
+Quality checks before a PR:
 
 ```bash
-cd src-tauri
-cargo run --bin tor-socks-cli -- status
-cargo run --bin tor-socks-cli -- start
-cargo run --bin tor-socks-cli -- stop
+make check
+make lint
 ```
 
-Linux aarch64 does not have an official Tor expert bundle; use
-`ALLOW_MISSING_TOR=1` only for sing-box-only development. Windows builds require
-signed release credentials and use WinTUN through sing-box.
+## Contributing
 
-## Contributing and releases
+Contributions are welcome under GPL-3.0. Please read
+[CONTRIBUTING.md](CONTRIBUTING.md) and our
+[Code of Conduct](CODE_OF_CONDUCT.md) first. Report security issues privately per
+[SECURITY.md](SECURITY.md) — never in a public issue.
 
-Contributions are licensed under GPL-3.0. Run TypeScript, Rust format, tests,
-Clippy, and dependency audits before opening a pull request. Release CI produces
-signed/notarized artifacts, updater signatures, checksums, and CycloneDX SBOMs;
-see [CONTRIBUTING.md](CONTRIBUTING.md).
+## Documentation
 
-Bundled component notices and exact corresponding-source links are in
-[`src-tauri/resources/licenses/THIRD_PARTY.md`](src-tauri/resources/licenses/THIRD_PARTY.md).
-The local `priuvacy-sexy.txt` research artifact is not bundled.
+- [Onion Lab: host your own onion endpoint](docs/ONION_LAB.md)
+- [Architecture](ARCHITECTURE.md)
+- [Threat model](THREAT_MODEL.md)
+- [Security policy](SECURITY.md)
+- [Privacy](PRIVACY.md)
+- [Release process](RELEASE.md)
 
-## Trademark and affiliation
+## License & trademark
 
-OnionGate is an independent project. It is not sponsored by, endorsed by, or
-affiliated with The Tor Project. “Tor” and the onion logo are trademarks of The
-Tor Project; OnionGate does not use the official Tor onion logo.
+OnionGate is licensed under [GPL-3.0](LICENSE). Bundled component notices and
+corresponding-source links are in
+[`THIRD_PARTY.md`](src-tauri/resources/licenses/THIRD_PARTY.md).
+
+OnionGate is an independent project — not affiliated with or endorsed by The Tor
+Project. "Tor" and the onion logo are trademarks of The Tor Project; OnionGate
+uses its own logo, not the official Tor onion logo.

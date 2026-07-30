@@ -106,14 +106,7 @@ export function HomePage({
       : "Off";
 
   return (
-    <section className="flex flex-col gap-5">
-      <header>
-        <h2 className="text-xl font-semibold tracking-tight">{t("connect")}</h2>
-        <p className="mt-1 text-sm text-muted">
-          {t("subtitle")}
-        </p>
-      </header>
-
+    <section className="flex flex-col gap-3">
       {recovery?.needed ? (
         <div className="flex items-center justify-between gap-3 rounded-xl border border-warn/50 bg-warn/10 px-4 py-3">
           <div>
@@ -136,8 +129,8 @@ export function HomePage({
         </div>
       ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_1.15fr] lg:items-center">
-        <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
+      <div className="grid gap-4 sm:grid-cols-[1fr_1.1fr] sm:items-center">
+        <div className="flex flex-col items-center text-center">
           <div className="inline-flex items-center gap-1.5">
             <Badge variant={badgeVariant as "default" | "success" | "warn"}>
               {protectionLabel}
@@ -152,11 +145,11 @@ export function HomePage({
               />
             ) : null}
           </div>
-          <div className="relative mt-6 flex h-48 w-48 items-center justify-center">
+          <div className="relative mt-3 flex h-44 w-44 items-center justify-center">
             <div
               className={cn(
-                "absolute inset-4 rounded-full blur-2xl transition-opacity",
-                torOn ? "bg-onion/25 opacity-100" : "opacity-0",
+                "pointer-events-none absolute -inset-3 rounded-full blur-3xl transition-all duration-500",
+                torOn ? "bg-accent/30" : "bg-onion/15",
               )}
             />
             <button
@@ -168,20 +161,48 @@ export function HomePage({
                 "relative z-10 flex h-40 w-40 items-center justify-center rounded-full border-2 transition-all",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-onion/50",
                 torOn
-                  ? "border-onion bg-gradient-to-b from-onion/25 to-panel shadow-[0_0_40px_rgba(224,179,90,0.25)]"
-                  : "border-line bg-panel hover:border-muted",
+                  ? "border-accent bg-gradient-to-b from-accent/20 to-panel shadow-[0_0_50px_-4px_rgba(16,185,129,0.45)]"
+                  : "border-line bg-panel hover:border-onion/60 hover:shadow-[0_0_44px_-8px_rgba(124,58,237,0.4)]",
+                status?.tor_installed &&
+                  !busy &&
+                  "cursor-pointer hover:scale-[1.02] active:scale-[0.98]",
                 busy && "animate-pulse",
                 (!status?.tor_installed || busy) && "opacity-60",
               )}
             >
               {busy ? (
-                <Loader2 className="h-10 w-10 animate-spin text-onion" />
+                <div className="flex flex-col items-center gap-2">
+                  <Loader2 className="h-9 w-9 animate-spin text-onion" />
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                    {t("working")}
+                  </span>
+                </div>
               ) : (
-                <OnionIcon className="h-16 w-16 text-onion" />
+                <div className="flex flex-col items-center gap-1.5">
+                  <OnionIcon
+                    className={cn(
+                      "h-12 w-12 transition-colors",
+                      torOn ? "text-accent" : "text-onion",
+                    )}
+                  />
+                  <span
+                    className={cn(
+                      "text-xs font-semibold transition-colors",
+                      torOn ? "text-accent" : "text-onion",
+                    )}
+                  >
+                    {torOn ? t("disconnectAction") : t("connectAction")}
+                  </span>
+                </div>
               )}
             </button>
           </div>
-          <p className="mt-3 text-sm text-muted">
+          <p
+            className={cn(
+              "mt-4 text-[13px] font-medium",
+              torOn ? "text-accent-strong" : "text-muted",
+            )}
+          >
             {!status?.tor_installed
               ? (status?.install_hint ?? "Tor runtime missing")
               : busy
@@ -247,10 +268,42 @@ export function HomePage({
               System proxy: {proxyOn ? "ON" : "OFF"}
             </Button>
           </div>
+
+          <div className="rounded-xl border border-line bg-panel p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+                  Download
+                </div>
+                <div className="text-base font-semibold tabular-nums">
+                  {formatRate(session?.rate_down_bps ?? 0)}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+                  Upload
+                </div>
+                <div className="text-base font-semibold tabular-nums">
+                  {formatRate(session?.rate_up_bps ?? 0)}
+                </div>
+              </div>
+            </div>
+            <div className="mt-2 h-16 overflow-hidden rounded-lg border border-line bg-canvas">
+              <div
+                className={cn(
+                  "h-full w-full bg-gradient-to-r from-accent/10 via-accent/30 to-transparent transition-opacity",
+                  torOn ? "opacity-100" : "opacity-30",
+                )}
+                style={{
+                  clipPath: `polygon(0 70%, 15% ${70 - Math.min(40, (session?.rate_down_bps ?? 0) / 500)}%, 35% 55%, 55% ${60 - Math.min(35, (session?.rate_up_bps ?? 0) / 500)}%, 75% 50%, 100% 65%, 100% 100%, 0 100%)`,
+                }}
+              />
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="rounded-xl border border-line bg-panel p-4 space-y-3">
+      <div className="rounded-xl border border-line bg-panel p-3 space-y-2.5">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5">
             <div id="home-smart-connect-label" className="text-sm font-semibold">
@@ -311,16 +364,7 @@ export function HomePage({
             <Select
               value={settings?.exit_country ?? ""}
               disabled={busy}
-              onChange={(e) => {
-                const country = e.target.value;
-                void run(async () => {
-                  const msg = await invoke<string>("set_exit_country", {
-                    country,
-                  });
-                  await refreshSettings();
-                  return msg;
-                });
-              }}
+              onChange={(e) => app.applyExitCountry(e.target.value)}
             >
               {(exitCountries.length
                 ? exitCountries
@@ -367,84 +411,32 @@ export function HomePage({
         </div>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-2">
-        <div className="rounded-xl border border-line bg-panel p-4">
-          <div className="text-sm font-semibold">Network overview</div>
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-muted">
-                Download
-              </div>
-              <div className="mt-1 text-lg font-semibold tabular-nums">
-                {formatRate(session?.rate_down_bps ?? 0)}
-              </div>
-            </div>
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-muted">
-                Upload
-              </div>
-              <div className="mt-1 text-lg font-semibold tabular-nums">
-                {formatRate(session?.rate_up_bps ?? 0)}
-              </div>
-            </div>
-          </div>
-          <div className="mt-4 h-16 overflow-hidden rounded-lg border border-line bg-canvas">
-            <div
-              className={cn(
-                "h-full w-full bg-gradient-to-r from-accent/10 via-accent/25 to-transparent transition-opacity",
-                torOn ? "opacity-100" : "opacity-30",
-              )}
-              style={{
-                clipPath: `polygon(0 70%, 15% ${70 - Math.min(40, (session?.rate_down_bps ?? 0) / 500)}%, 35% 55%, 55% ${60 - Math.min(35, (session?.rate_up_bps ?? 0) / 500)}%, 75% 50%, 100% 65%, 100% 100%, 0 100%)`,
-              }}
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2">
-          <StatTile
-            title="Data transferred"
-            value={formatBytes(session?.bytes_total ?? 0)}
-            hint="Total traffic seen on the current Tor session"
-          />
-          <StatTile
-            title="Circuits built"
-            value={String(session?.circuits ?? 0)}
-            hint="Live circuit count from the Tor control port"
-          />
-          <StatTile
-            title="Identity changes"
-            value={String(session?.identity_changes ?? 0)}
-            hint="New identity requests during this app session"
-          />
-          <StatTile
-            title="Uptime"
-            value={formatUptime(session?.uptime_secs ?? 0)}
-            hint="Connected runtime for this session"
-          />
-        </div>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <CompactStat
+          label="Data"
+          value={formatBytes(session?.bytes_total ?? 0)}
+        />
+        <CompactStat label="Circuits" value={String(session?.circuits ?? 0)} />
+        <CompactStat
+          label="Identity"
+          value={String(session?.identity_changes ?? 0)}
+        />
+        <CompactStat
+          label="Uptime"
+          value={formatUptime(session?.uptime_secs ?? 0)}
+        />
       </div>
-
     </section>
   );
 }
 
-function StatTile({
-  title,
-  value,
-  hint,
-}: {
-  title: string;
-  value: string;
-  hint: string;
-}) {
+function CompactStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-line bg-panel px-3 py-3">
-      <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
-        {title}
-        <InfoTip content={hint} />
+    <div className="rounded-lg border border-line bg-panel px-2.5 py-2 text-center">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+        {label}
       </div>
-      <div className="mt-1 text-xl font-semibold tabular-nums tracking-tight">
+      <div className="mt-0.5 text-sm font-semibold tabular-nums tracking-tight">
         {value}
       </div>
     </div>

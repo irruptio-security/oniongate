@@ -1,0 +1,19 @@
+---
+description: Tauri config, CSP, sidecars, updater, and capabilities
+globs: src-tauri/tauri.conf.json,src-tauri/capabilities/**/*.json
+alwaysApply: false
+---
+
+# Tauri config & capabilities
+
+- Keep the CSP strict. Do not add remote origins to `connect-src` / `img-src` /
+  `script-src`; all backend calls go over IPC.
+- `externalBin` lists sidecars by base name (`binaries/tor`, `binaries/sing-box`,
+  `binaries/lyrebird`, `binaries/obfs4proxy`); Tauri appends the
+  `-<target-triple>` suffix. Keep this list in sync with how
+  `scripts/download-deps.sh` stages sidecars.
+- The updater `pubkey` is the trust root. Do not rotate it casually — changing it
+  breaks updates for already-installed clients. The matching private key lives
+  outside the repo (see `.github/RELEASE_SECRETS.md`).
+- Grant the **minimum** capabilities in `capabilities/`. Do not add broad shell,
+  fs, or http permissions.

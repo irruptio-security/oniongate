@@ -1,0 +1,20 @@
+---
+description: CI checks and signed-release process invariants
+globs: .github/workflows/**,.github/RELEASE_SECRETS.md
+alwaysApply: false
+---
+
+# Release & CI
+
+- `ci.yml` runs on macOS/Linux/Windows: `typecheck`, `cargo fmt --check`, clippy,
+  `cargo test`, `npm audit`, and `cargo audit`. Keep them green; match the
+  toolchain pinned in `.nvmrc`.
+- Release artifacts must be built by CI from a tag, signed + notarized (macOS),
+  checksummed (`SHA256SUMS`), and shipped with CycloneDX SBOMs and license /
+  corresponding-source links. Follow the full checklist in `RELEASE.md`.
+- Never put credential values in code, workflows, commits, or logs — only GitHub
+  Actions secrets (see `RELEASE_SECRETS.md`). The Tauri updater private key and
+  password must be backed up offline; losing them permanently breaks updates.
+- Missing macOS/updater secrets must fail the release. Missing Windows signing
+  produces an explicitly experimental unsigned artifact that must never be
+  labeled stable.

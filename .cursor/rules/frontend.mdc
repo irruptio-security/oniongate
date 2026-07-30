@@ -1,0 +1,21 @@
+---
+description: React UI conventions and Tauri command usage
+globs: src/**/*.ts,src/**/*.tsx,src/**/*.css
+alwaysApply: false
+---
+
+# Frontend (React 19 + Tauri)
+
+- Call the Rust core with `invoke<T>("command_name")` from `@tauri-apps/api/core`.
+  Keep backend calls centralized in `src/hooks/useTorApp.ts` rather than scattered
+  across pages.
+- Shared types live in `src/lib/types.ts` and must match the Rust command
+  signatures. Import with the `@/` alias (configured in `tsconfig.json` / `vite.config.ts`).
+- The UI is presentational: it renders status and sends typed commands. Never
+  implement routing / firewall / secret logic in the UI, and never display or
+  store onion keys, client credentials, bridge lines, or public IPs beyond what
+  the backend already redacts.
+- Components are functional only. Reuse primitives in `src/components/ui/*`; pages
+  live in `src/pages/*`. Style with Tailwind v4 and `cn()` from `@/lib/utils`.
+- User-facing strings go through `@/lib/i18n`; respect `dir` (fa = RTL).
+- Connection presets live in `src/lib/presets.ts`.

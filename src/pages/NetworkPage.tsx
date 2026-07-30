@@ -221,15 +221,7 @@ export function NetworkPage({
               size="sm"
               variant="secondary"
               disabled={busy}
-              onClick={() =>
-                void run(async () => {
-                  const msg = await invoke<string>("set_exit_country", {
-                    country: exitDraft,
-                  });
-                  await refreshSettings();
-                  return msg;
-                })
-              }
+              onClick={() => app.applyExitCountry(exitDraft)}
             >
               Apply
             </Button>

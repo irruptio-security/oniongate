@@ -1,16 +1,18 @@
 # Contributing
 
 OnionGate is GPL-3.0 software. By contributing, you agree that your contribution
-is distributed under GPL-3.0.
+is distributed under GPL-3.0. Participation is governed by our
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Development
 
 ```bash
-npm ci
-npm run deps
-npm run check
-cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings
+make setup
+make check
+make lint
 ```
+
+(`make help` lists setup, dev, build, clean, and other targets.)
 
 Do not add downloaded executables, onion keys, bridge lines, logs, or local
 security reports to commits.

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use tokio::process::{Child, Command};
 
 use crate::deps;
+use crate::settings::AppSettings;
 use crate::tor::process::ISOLATED_SOCKS_PORT;
 use crate::tor::{DNS_PORT, SOCKS_HOST};
 
@@ -58,6 +59,15 @@ fn dns_server(remote_dns: bool) -> (serde_json::Value, &'static str) {
 pub fn write_config() -> Result<PathBuf, String> {
     let path = config_path()?;
     let settings = crate::settings::load();
+    let log_output = log_path()?.display().to_string();
+    let config = build_config(&settings, &log_output);
+    let raw = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize sing-box config: {e}"))?;
+    fs::write(&path, raw).map_err(|e| format!("Failed to write sing-box config: {e}"))?;
+    Ok(path)
+}
+
+fn build_config(settings: &AppSettings, log_output: &str) -> serde_json::Value {
     let (dns_server, dns_tag) = dns_server(settings.remote_dns);
 
     let mut rules = vec![
@@ -117,10 +127,10 @@ pub fn write_config() -> Result<PathBuf, String> {
         "tor-socks"
     };
 
-    let config = serde_json::json!({
+    serde_json::json!({
         "log": {
             "level": "info",
-            "output": log_path()?.display().to_string(),
+            "output": log_output,
             "timestamp": true
         },
         "dns": {
@@ -145,11 +155,7 @@ pub fn write_config() -> Result<PathBuf, String> {
             "final": final_outbound,
             "auto_detect_interface": true
         }
-    });
-    let raw = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("Failed to serialize sing-box config: {e}"))?;
-    fs::write(&path, raw).map_err(|e| format!("Failed to write sing-box config: {e}"))?;
-    Ok(path)
+    })
 }
 
 pub fn process_seems_running() -> bool {
@@ -543,6 +549,169 @@ mod tests {
         let (server, tag) = dns_server(false);
         assert_eq!(tag, "system-dns");
         assert_eq!(server["address"], "local");
+    }
+
+    use crate::settings::AppIdentity;
+
+    fn app(id: &str, process: &str, epoch: u64) -> AppIdentity {
+        AppIdentity {
+            id: id.into(),
+            label: id.into(),
+            process_name: process.into(),
+            circuit_epoch: epoch,
+            ..AppIdentity::default()
+        }
+    }
+
+    fn rules(config: &serde_json::Value) -> &Vec<serde_json::Value> {
+        config["route"]["rules"].as_array().unwrap()
+    }
+
+    fn outbound_tags(config: &serde_json::Value) -> Vec<String> {
+        config["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|o| o["tag"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    /// Tunnelling UDP would leak past Tor, so every UDP path must hit `block`.
+    #[test]
+    fn udp_and_quic_are_always_blocked() {
+        let config = build_config(&AppSettings::default(), "/tmp/sing-box.log");
+        let blocked: Vec<&serde_json::Value> = rules(&config)
+            .iter()
+            .filter(|r| r["outbound"] == "block")
+            .collect();
+        assert!(blocked.iter().any(|r| r["protocol"] == "quic"));
+        assert!(blocked
+            .iter()
+            .any(|r| r["network"] == "udp" && r["port"] == 443));
+        assert!(blocked
+            .iter()
+            .any(|r| r["network"] == "udp" && r.get("port").is_none()));
+    }
+
+    #[test]
+    fn default_settings_send_everything_through_tor() {
+        let config = build_config(&AppSettings::default(), "/tmp/sing-box.log");
+        assert_eq!(config["route"]["final"], "tor-socks");
+        assert_eq!(config["outbounds"][0]["server_port"], ISOLATED_SOCKS_PORT);
+        assert_eq!(config["inbounds"][0]["strict_route"], true);
+    }
+
+    /// `only` guards the listed apps: they get Tor, everything else goes direct.
+    #[test]
+    fn only_policy_routes_listed_apps_through_isolated_circuits() {
+        let settings = AppSettings {
+            split_tunnel: true,
+            app_routing_policy: "only".into(),
+            route_apps: vec![app("a", "signal", 7), app("b", "hexchat", 9)],
+            ..AppSettings::default()
+        };
+        let config = build_config(&settings, "/tmp/sing-box.log");
+
+        assert_eq!(config["route"]["final"], "direct");
+
+        let tags = outbound_tags(&config);
+        assert!(tags.contains(&"tor-app-0".to_string()));
+        assert!(tags.contains(&"tor-app-1".to_string()));
+
+        let app_rules: Vec<&serde_json::Value> = rules(&config)
+            .iter()
+            .filter(|r| r.get("process_name").is_some())
+            .collect();
+        assert_eq!(app_rules.len(), 2);
+        for rule in app_rules {
+            let out = rule["outbound"].as_str().unwrap();
+            assert!(out.starts_with("tor-app-"), "{rule}");
+        }
+    }
+
+    /// Distinct SOCKS credentials per app keep their circuits unlinkable.
+    #[test]
+    fn each_routed_app_gets_unique_socks_credentials() {
+        let settings = AppSettings {
+            split_tunnel: true,
+            app_routing_policy: "only".into(),
+            route_apps: vec![app("a", "signal", 7), app("b", "hexchat", 9)],
+            ..AppSettings::default()
+        };
+        let config = build_config(&settings, "/tmp/sing-box.log");
+        let creds: Vec<(String, String)> = config["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|o| o["type"] == "socks")
+            .map(|o| {
+                (
+                    o["username"].as_str().unwrap().to_string(),
+                    o["password"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        let unique: std::collections::HashSet<&(String, String)> = creds.iter().collect();
+        assert_eq!(unique.len(), creds.len(), "duplicate circuit credentials");
+        assert!(creds.contains(&("oniongate-0".into(), "7".into())));
+        assert!(creds.contains(&("oniongate-1".into(), "9".into())));
+    }
+
+    /// `except` inverts the policy: listed apps bypass Tor, the rest are guarded.
+    #[test]
+    fn except_policy_sends_listed_apps_direct_and_the_rest_via_tor() {
+        let settings = AppSettings {
+            split_tunnel: true,
+            app_routing_policy: "except".into(),
+            route_apps: vec![app("a", "zoom", 3)],
+            ..AppSettings::default()
+        };
+        let config = build_config(&settings, "/tmp/sing-box.log");
+
+        assert_eq!(config["route"]["final"], "tor-socks");
+        let rule = rules(&config)
+            .iter()
+            .find(|r| r.get("process_name").is_some())
+            .unwrap();
+        assert_eq!(rule["outbound"], "direct");
+        assert!(!outbound_tags(&config).contains(&"tor-app-0".to_string()));
+    }
+
+    /// A recorded executable path is a stronger identity than a process name.
+    #[test]
+    fn executable_path_is_preferred_over_process_name() {
+        let settings = AppSettings {
+            split_tunnel: true,
+            route_apps: vec![AppIdentity {
+                id: "a".into(),
+                process_name: "signal".into(),
+                executable_path: "/Applications/Signal.app/Contents/MacOS/Signal".into(),
+                ..AppIdentity::default()
+            }],
+            ..AppSettings::default()
+        };
+        let config = build_config(&settings, "/tmp/sing-box.log");
+        let rule = rules(&config)
+            .iter()
+            .find(|r| r.get("process_path").is_some())
+            .unwrap();
+        assert_eq!(
+            rule["process_path"][0],
+            "/Applications/Signal.app/Contents/MacOS/Signal"
+        );
+        assert!(rule.get("process_name").is_none());
+    }
+
+    /// Split tunnel with no apps selected must not silently drop the guard.
+    #[test]
+    fn empty_split_tunnel_still_routes_everything_through_tor() {
+        let settings = AppSettings {
+            split_tunnel: true,
+            route_apps: Vec::new(),
+            ..AppSettings::default()
+        };
+        let config = build_config(&settings, "/tmp/sing-box.log");
+        assert_eq!(config["route"]["final"], "tor-socks");
     }
 }
 

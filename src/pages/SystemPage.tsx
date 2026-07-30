@@ -1,11 +1,9 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
 import type { TorApp } from "@/hooks/useTorApp";
-import { HardenPage } from "@/pages/HardenPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { LogsPage } from "@/pages/LogsPage";
 import { cn } from "@/lib/utils";
@@ -34,21 +32,6 @@ type PersistenceReport = {
   removed_ids: string[];
 };
 
-type ArtifactReport = {
-  path: string;
-  kind: string;
-  sha256: string;
-  quarantined: boolean;
-  signature_valid: boolean;
-  notarized: boolean;
-  identifier: string | null;
-  team_id: string | null;
-  authorities: string[];
-  entitlements: string[];
-  detail: string;
-  reputation_url: string;
-};
-
 type HostTool = {
   id: string;
   name: string;
@@ -71,7 +54,6 @@ export function SystemPage({ app }: { app: TorApp }) {
   const [postureError, setPostureError] = useState<string | null>(null);
   const [persistence, setPersistence] = useState<PersistenceReport | null>(null);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
-  const [artifact, setArtifact] = useState<ArtifactReport | null>(null);
   const [tools, setTools] = useState<HostTool[]>([]);
   const [loginItems, setLoginItems] = useState<LoginItemsSnapshot | null>(null);
 
@@ -102,26 +84,6 @@ export function SystemPage({ app }: { app: TorApp }) {
     void refreshPosture();
   }, []);
 
-  if (view === "harden") {
-    return (
-      <section className="flex flex-col gap-4">
-        <Segmented
-          value={view}
-          options={[
-            { value: "audit", label: "Posture" },
-            { value: "persistence", label: "Persistence" },
-            { value: "artifact", label: "Artifact Inspector" },
-            { value: "harden", label: "Optional Harden" },
-            { value: "settings", label: "Settings" },
-            { value: "logs", label: "Logs" },
-          ]}
-          onChange={setView}
-        />
-        <HardenPage app={app} />
-      </section>
-    );
-  }
-
   return (
     <section className="flex flex-col gap-5">
       <header>
@@ -135,8 +97,6 @@ export function SystemPage({ app }: { app: TorApp }) {
         options={[
           { value: "audit", label: "Posture" },
           { value: "persistence", label: "Persistence" },
-          { value: "artifact", label: "Artifact Inspector" },
-          { value: "harden", label: "Optional Harden" },
           { value: "settings", label: "Settings" },
           { value: "logs", label: "Logs" },
         ]}
@@ -332,50 +292,6 @@ export function SystemPage({ app }: { app: TorApp }) {
         </div>
       ) : null}
 
-      {view === "artifact" ? (
-        <div className="space-y-3">
-          <Button
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                const path = await open({
-                  title: "Inspect an app, DMG, PKG, or Mach-O",
-                  multiple: false,
-                  directory: false,
-                });
-                if (!path) return "Inspection cancelled";
-                const result = await invoke<ArtifactReport>("inspect_artifact", { path });
-                setArtifact(result);
-                return "Artifact inspection complete";
-              })
-            }
-          >
-            Choose artifact
-          </Button>
-          {artifact ? (
-            <div className="rounded-xl border border-line bg-panel p-4 text-xs">
-              <div className="font-semibold">{artifact.path}</div>
-              <div className="mt-2 grid gap-1 text-muted">
-                <div>SHA-256: <span className="break-all font-mono">{artifact.sha256}</span></div>
-                <div>Quarantine: {artifact.quarantined ? "present" : "absent"}</div>
-                <div>Signature: {artifact.signature_valid ? "valid" : "invalid or unsigned"}</div>
-                <div>Notarization assessment: {artifact.notarized ? "accepted" : "not accepted"}</div>
-                <div>Identifier: {artifact.identifier ?? "unknown"}</div>
-                <div>Team ID: {artifact.team_id ?? "unknown"}</div>
-                <div>Entitlements: {artifact.entitlements.join(", ") || "none reported"}</div>
-              </div>
-              <Button
-                className="mt-3"
-                size="sm"
-                variant="secondary"
-                onClick={() => void openUrl(artifact.reputation_url)}
-              >
-                Check hash reputation
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
       {view === "settings" ? <SettingsPage app={app} /> : null}
       {view === "logs" ? <LogsPage app={app} /> : null}
     </section>

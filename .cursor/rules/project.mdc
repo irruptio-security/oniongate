@@ -1,0 +1,32 @@
+---
+description: OnionGate project overview and non-negotiable security invariants
+alwaysApply: true
+---
+
+# OnionGate
+
+Tauri 2 desktop app (React UI + Rust core) that routes selected apps through
+isolated Tor circuits, runs an ephemeral Onion Lab, and verifies the workstation
+is not leaking. It is **not** a VPN, Tor Browser, Tails, Whonix, an antivirus, or
+a general application firewall.
+
+## Non-negotiable invariants (apply everywhere)
+
+- **Fail closed.** Never silently fall back to a direct route when Tor, TUN, or
+  the route policy is unavailable. Guarded apps must suspend rather than leak.
+- **Never weaken Tor circuits** or downgrade isolation just to "make it work."
+- **Never log, persist, or export secrets:** onion private keys, v3 client
+  authorization, bridge lines, Tor control cookies, verification public IPs, or
+  full process command lines.
+- **Every privileged/network mutation** (proxy, TUN, firewall, Tor, transport)
+  must be journaled for crash recovery and be reversible.
+- **GUI and CLI call the same orchestration APIs.** No command may report a
+  protected state until all required components are verified live.
+- **Pin every bundled sidecar** by SHA-256 in `scripts/dependencies.sha256`;
+  never consume untrusted bridge feeds.
+
+## Where things live
+
+`src/` React UI · `src-tauri/src/` Rust core · `scripts/` dependency fetch ·
+`.github/` CI/release. Human docs: `README`, `ARCHITECTURE`, `THREAT_MODEL`,
+`SECURITY`, `PRIVACY`, `RELEASE`, `CONTRIBUTING`, `docs/DEMO`.

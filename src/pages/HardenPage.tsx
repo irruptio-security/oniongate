@@ -183,8 +183,7 @@ export function HardenPage({ app }: { app: TorApp }) {
     }
   };
 
-  // Harden lives under the System tab now, so fetch items when this page
-  // mounts rather than relying on a dedicated (removed) top-level tab.
+  // OS Hardening is a top-level tab; fetch items when it mounts.
   useEffect(() => {
     void refreshHarden();
   }, [refreshHarden]);
@@ -221,9 +220,10 @@ export function HardenPage({ app }: { app: TorApp }) {
     <section className="flex flex-col gap-3">
       <header className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="text-xl font-semibold tracking-tight">Harden</h2>
+          <h2 className="text-xl font-semibold tracking-tight">OS Hardening</h2>
           <p className="text-xs text-muted">
-            Opt-in OS helpers · details in (i)
+            Reversible {platformBadge} privacy &amp; security helpers · details in
+            (i)
           </p>
         </div>
         <span className="inline-flex items-center gap-1 rounded-md border border-line bg-panel px-2 py-0.5 text-[11px] font-semibold text-ink">
@@ -237,9 +237,14 @@ export function HardenPage({ app }: { app: TorApp }) {
       </header>
 
       {isLinux ? (
-        <div className="rounded-lg border border-line bg-panel px-3 py-3 text-xs text-muted">
-          Linux hardening is coming next — firewall, telemetry, and sharing
-          toggles similar to macOS.
+        <div className="rounded-lg border border-line bg-panel px-4 py-6 text-center">
+          <p className="text-sm font-medium text-ink">
+            Linux hardening is on the way
+          </p>
+          <p className="mx-auto mt-1 max-w-sm text-xs text-muted">
+            Per-distro options (firewall, telemetry, mDNS, and sharing toggles)
+            are being finalized and will appear here.
+          </p>
         </div>
       ) : null}
 

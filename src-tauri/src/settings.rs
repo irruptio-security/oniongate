@@ -255,3 +255,150 @@ pub fn update(mutator: impl FnOnce(&mut AppSettings)) -> Result<AppSettings, Str
 pub fn set_remote_dns(enabled: bool) -> Result<AppSettings, String> {
     update(|s| s.remote_dns = enabled)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn normalized(mutate: impl FnOnce(&mut AppSettings)) -> AppSettings {
+        let mut settings = AppSettings::default();
+        mutate(&mut settings);
+        normalize(&mut settings);
+        settings
+    }
+
+    #[test]
+    fn unknown_enumerations_fall_back_to_safe_defaults() {
+        let s = normalized(|s| {
+            s.log_level = "trace".into();
+            s.locale = "klingon".into();
+            s.theme = "neon".into();
+            s.connection_mode = "carrier-pigeon".into();
+            s.app_routing_policy = "sometimes".into();
+        });
+        assert_eq!(s.log_level, "notice");
+        assert_eq!(s.locale, "auto");
+        assert_eq!(s.theme, "auto");
+        assert_eq!(s.connection_mode, "proxy");
+        assert_eq!(s.app_routing_policy, "only");
+    }
+
+    #[test]
+    fn status_poll_interval_is_clamped() {
+        assert_eq!(normalized(|s| s.status_poll_secs = 0).status_poll_secs, 2);
+        assert_eq!(
+            normalized(|s| s.status_poll_secs = 9999).status_poll_secs,
+            60
+        );
+    }
+
+    #[test]
+    fn exit_country_is_lowercased_and_validated() {
+        assert_eq!(
+            normalized(|s| s.exit_country = " DE ".into()).exit_country,
+            "de"
+        );
+        assert!(normalized(|s| s.exit_country = "germany".into())
+            .exit_country
+            .is_empty());
+        assert!(normalized(|s| s.exit_country = "d1".into())
+            .exit_country
+            .is_empty());
+    }
+
+    /// Selecting "none" must not leave stale bridges armed in the torrc.
+    #[test]
+    fn bridge_source_none_disables_bridges() {
+        let s = normalized(|s| {
+            s.bridge_source = "none".into();
+            s.bridges_enabled = true;
+            s.bridge_lines = vec!["obfs4 203.0.113.5:443 ABC".into()];
+        });
+        assert!(!s.bridges_enabled);
+    }
+
+    #[test]
+    fn unrecognised_bridge_source_is_treated_as_none() {
+        let s = normalized(|s| {
+            s.bridge_source = "https://evil.example/bridges".into();
+            s.bridges_enabled = true;
+        });
+        assert_eq!(s.bridge_source, "none");
+        assert!(!s.bridges_enabled);
+    }
+
+    #[test]
+    fn bridge_lines_are_prefixed_deduplicated_and_stripped_of_comments() {
+        let s = normalized(|s| {
+            s.bridge_source = "custom".into();
+            s.bridge_lines = vec![
+                "obfs4 203.0.113.5:443 ABC".into(),
+                "Bridge obfs4 203.0.113.5:443 ABC".into(),
+                "# a comment".into(),
+                "   ".into(),
+            ];
+        });
+        assert_eq!(s.bridge_lines, vec!["Bridge obfs4 203.0.113.5:443 ABC"]);
+    }
+
+    #[test]
+    fn routed_apps_are_sorted_deduplicated_and_require_an_identity() {
+        let s = normalized(|s| {
+            s.route_apps = vec![
+                AppIdentity {
+                    id: "z".into(),
+                    process_name: "zed".into(),
+                    ..AppIdentity::default()
+                },
+                AppIdentity {
+                    id: "a".into(),
+                    process_name: "signal".into(),
+                    ..AppIdentity::default()
+                },
+                AppIdentity {
+                    id: "a".into(),
+                    process_name: "signal".into(),
+                    ..AppIdentity::default()
+                },
+                AppIdentity {
+                    id: "no-target".into(),
+                    ..AppIdentity::default()
+                },
+            ];
+        });
+        let ids: Vec<&str> = s.route_apps.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "z"]);
+        assert_eq!(s.split_tunnel_apps, vec!["signal", "zed"]);
+    }
+
+    #[test]
+    fn legacy_process_name_lists_migrate_to_app_identities() {
+        let s = normalized(|s| s.split_tunnel_apps = vec!["signal".into()]);
+        assert_eq!(s.route_apps.len(), 1);
+        assert_eq!(s.route_apps[0].process_name, "signal");
+        assert_eq!(s.route_apps[0].id, "legacy:signal");
+    }
+
+    #[test]
+    fn settings_round_trip_through_json() {
+        let original = normalized(|s| {
+            s.bridge_source = "custom".into();
+            s.bridge_lines = vec!["obfs4 203.0.113.5:443 ABC".into()];
+            s.exit_country = "SE".into();
+        });
+        let raw = serde_json::to_string(&original).unwrap();
+        let mut restored: AppSettings = serde_json::from_str(&raw).unwrap();
+        normalize(&mut restored);
+        assert_eq!(restored.bridge_lines, original.bridge_lines);
+        assert_eq!(restored.exit_country, "se");
+    }
+
+    /// Older configs are missing newer keys; they must not reset the whole file.
+    #[test]
+    fn partial_json_keeps_defaults_for_absent_keys() {
+        let settings: AppSettings = serde_json::from_str(r#"{"log_level":"info"}"#).unwrap();
+        assert_eq!(settings.log_level, "info");
+        assert!(settings.remote_dns);
+        assert_eq!(settings.connection_mode, "proxy");
+    }
+}

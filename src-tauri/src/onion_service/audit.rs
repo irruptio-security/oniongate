@@ -23,6 +23,19 @@ pub struct OnionAudit {
     pub warnings: Vec<String>,
 }
 
+/// Detect a listener bound to every interface in `lsof`/`ss`/`netstat` output.
+///
+/// Publishing an onion service for a wildcard-bound port would expose the same
+/// service on the clearnet, so this must never miss a wildcard bind.
+fn binds_wildcard(listing: &str, port: u16) -> bool {
+    listing.lines().any(|line| {
+        line.contains(&format!("*:{port}"))
+            || line.contains(&format!("0.0.0.0:{port}"))
+            || line.contains(&format!("[::]:{port}"))
+            || line.contains(&format!(":::{port}"))
+    })
+}
+
 pub fn inspect_listener(port: u16) -> ListenerAudit {
     let reachable = TcpStream::connect_timeout(
         &SocketAddr::from(([127, 0, 0, 1], port)),
@@ -63,12 +76,7 @@ pub fn inspect_listener(port: u16) -> ListenerAudit {
         };
     };
     let text = String::from_utf8_lossy(&output.stdout);
-    let wildcard = text.lines().any(|line| {
-        line.contains(&format!("*:{port}"))
-            || line.contains(&format!("0.0.0.0:{port}"))
-            || line.contains(&format!("[::]:{port}"))
-            || line.contains(&format!(":::{port}"))
-    });
+    let wildcard = binds_wildcard(&text, port);
     ListenerAudit {
         reachable: true,
         loopback_only: !wildcard,
@@ -132,4 +140,45 @@ pub async fn audit(project: &OnionProject) -> Result<OnionAudit, String> {
         security_headers,
         warnings,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loopback_listener_is_not_flagged() {
+        let lsof = "COMMAND   PID USER   FD TYPE DEVICE SIZE/OFF NODE NAME\n\
+                    python  4321 me     3u IPv4  0x1234      0t0  TCP 127.0.0.1:8080 (LISTEN)\n";
+        assert!(!binds_wildcard(lsof, 8080));
+    }
+
+    #[test]
+    fn wildcard_binds_are_detected_in_lsof_output() {
+        let ipv4 = "python 1 me 3u IPv4 0x1 0t0 TCP *:8080 (LISTEN)\n";
+        let any = "python 1 me 3u IPv4 0x1 0t0 TCP 0.0.0.0:8080 (LISTEN)\n";
+        let ipv6 = "python 1 me 3u IPv6 0x1 0t0 TCP [::]:8080 (LISTEN)\n";
+        assert!(binds_wildcard(ipv4, 8080));
+        assert!(binds_wildcard(any, 8080));
+        assert!(binds_wildcard(ipv6, 8080));
+    }
+
+    #[test]
+    fn wildcard_binds_are_detected_in_ss_output() {
+        let ss = "State  Recv-Q Send-Q Local Address:Port Peer Address:Port\n\
+                  LISTEN 0      4096         0.0.0.0:8080       0.0.0.0:*\n";
+        assert!(binds_wildcard(ss, 8080));
+
+        let ipv6 = "LISTEN 0 4096 :::8080 :::*\n";
+        assert!(binds_wildcard(ipv6, 8080));
+    }
+
+    /// A wildcard bind on a different port must not condemn our port.
+    #[test]
+    fn unrelated_ports_do_not_trigger_a_warning() {
+        let lsof = "nginx 1 me 3u IPv4 0x1 0t0 TCP *:80 (LISTEN)\n\
+                    python 2 me 3u IPv4 0x2 0t0 TCP 127.0.0.1:8080 (LISTEN)\n";
+        assert!(!binds_wildcard(lsof, 8080));
+        assert!(binds_wildcard(lsof, 80));
+    }
 }

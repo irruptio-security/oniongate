@@ -394,30 +394,45 @@ pub async fn apply_tor_config(state: State<'_, AppState>) -> Result<String, Stri
 pub async fn set_exit_country(
     state: State<'_, AppState>,
     country: String,
-) -> Result<String, String> {
+) -> Result<NewIdentityResult, String> {
     let settings = settings::update(|s| s.exit_country = country.clone())?;
     let cc = settings.exit_country.clone();
 
     if !tor::control_reachable() {
-        return Ok(if cc.is_empty() {
-            "Exit pin cleared. Start Tor to apply.".into()
+        let message = if cc.is_empty() {
+            "Exit pin cleared. Start Tor to apply.".to_string()
         } else {
             format!("Exit pin set to {{{cc}}}. Start Tor (or Apply) to use it.")
+        };
+        return Ok(NewIdentityResult {
+            message,
+            ips: ip::refresh_ips().await,
         });
     }
 
-    match tor::apply_exit_country(&cc).await {
-        Ok(msg) => Ok(msg),
+    let message = match tor::apply_exit_country(&cc).await {
+        Ok(msg) => msg,
         Err(_) => {
             let mut guard = state.managed_tor.lock().await;
             tor::restart_managed(&mut guard).await?;
-            Ok(if cc.is_empty() {
-                "Exit pin cleared; Tor restarted.".into()
+            if cc.is_empty() {
+                "Exit pin cleared; Tor restarted.".to_string()
             } else {
                 format!("Exit pin {{{cc}}} applied via Tor restart.")
-            })
+            }
         }
-    }
+    };
+
+    // Changing the exit pin issues NEWNYM (or restarts Tor); wait for the new
+    // circuit and retry the Tor IP so the refreshed location reflects the new
+    // exit country instead of racing the rebuilding circuit.
+    let ips = ip::refresh_ips_after_newnym().await;
+    let message = match (&ips.tor_ip, &ips.tor_location) {
+        (Some(ip), Some(loc)) => format!("{message} Tor IP: {ip} ({})", loc.label),
+        (Some(ip), None) => format!("{message} Tor IP: {ip}"),
+        _ => message,
+    };
+    Ok(NewIdentityResult { message, ips })
 }
 
 #[tauri::command]
@@ -498,11 +513,6 @@ pub fn get_persistence_report() -> Result<crate::workstation::PersistenceReport,
 #[tauri::command]
 pub fn save_persistence_baseline() -> Result<String, String> {
     crate::workstation::save_persistence_baseline()
-}
-
-#[tauri::command]
-pub fn inspect_artifact(path: String) -> Result<crate::workstation::ArtifactReport, String> {
-    crate::workstation::inspect_artifact(&path)
 }
 
 #[tauri::command]

@@ -149,3 +149,51 @@ async fn run_admin(shell: &str) -> Result<(), String> {
 fn shell_escape(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Clearnet UDP must be dropped while loopback stays usable for Tor's DNSPort.
+    #[test]
+    fn pf_rules_block_clearnet_udp_but_allow_loopback() {
+        let rules = pf_rules();
+        assert!(rules.contains("block drop out quick proto udp from any to any"));
+        assert!(rules.contains("pass out quick on lo0 proto udp all"));
+        assert!(rules.contains("pass out quick proto udp to 127.0.0.1"));
+
+        let block = rules
+            .lines()
+            .position(|l| l.starts_with("block drop"))
+            .unwrap();
+        let pass = rules.lines().position(|l| l.starts_with("pass")).unwrap();
+        assert!(block < pass, "loopback passes must follow the block rule");
+    }
+
+    /// These strings are interpolated into a root shell command.
+    #[test]
+    fn shell_escape_neutralises_quotes_and_metacharacters() {
+        assert_eq!(shell_escape("/tmp/pf.conf"), "'/tmp/pf.conf'");
+        assert_eq!(
+            shell_escape("/tmp/a b/pf.conf"),
+            "'/tmp/a b/pf.conf'",
+            "spaces must stay inside the quotes"
+        );
+        assert_eq!(
+            shell_escape("/tmp/'; rm -rf /; echo '"),
+            "'/tmp/'\\''; rm -rf /; echo '\\'''"
+        );
+    }
+
+    #[test]
+    fn escaped_paths_survive_a_round_trip_through_sh() {
+        let nasty = "/tmp/weird '$(id)` dir/pf.conf";
+        let escaped = shell_escape(nasty);
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("printf %s {escaped}"))
+            .output()
+            .expect("sh runs");
+        assert_eq!(String::from_utf8_lossy(&out.stdout), nasty);
+    }
+}

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
-import { OnionIcon } from "@/OnionIcon";
 import type { TorApp } from "@/hooks/useTorApp";
 import type { AppSettings } from "@/lib/types";
 import { PRESETS, presetPatch, type PresetId } from "@/lib/presets";
@@ -102,7 +101,12 @@ export function SetupWizard({ app }: { app: TorApp }) {
           onMouseDown={startWindowDrag}
           className="flex items-center gap-2.5 border-b border-line px-5 py-4"
         >
-          <OnionIcon className="h-7 w-7 text-onion" />
+          <img
+            src="/logo.png"
+            alt="OnionGate"
+            className="h-7 w-7 shrink-0"
+            draggable={false}
+          />
           <div className="min-w-0">
             <div id="setup-wizard-title" className="text-sm font-semibold tracking-tight">
               OnionGate setup

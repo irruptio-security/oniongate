@@ -136,7 +136,6 @@ pub fn run() {
             commands::get_workstation_posture,
             commands::get_persistence_report,
             commands::save_persistence_baseline,
-            commands::inspect_artifact,
             commands::get_host_security_tools,
             commands::scan_login_items,
             commands::open_full_disk_access_settings,

@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
 
-use super::{ArtifactReport, HostTool, PersistenceEntry, PersistenceReport, PostureCheck};
+use super::{HostTool, PersistenceEntry, PersistenceReport, PostureCheck};
 
 fn output(program: &str, args: &[&str]) -> (bool, String) {
     Command::new(program)
@@ -410,113 +410,6 @@ pub fn login_items_snapshot() -> super::LoginItemsSnapshot {
         items,
         detail,
     }
-}
-
-fn artifact_target(path: &Path) -> Result<PathBuf, String> {
-    if path.extension().and_then(|ext| ext.to_str()) == Some("app") {
-        let directory = path.join("Contents/MacOS");
-        return fs::read_dir(&directory)
-            .map_err(|e| format!("Cannot inspect application executable: {e}"))?
-            .flatten()
-            .map(|entry| entry.path())
-            .find(|entry| entry.is_file())
-            .ok_or_else(|| "Application has no executable in Contents/MacOS".into());
-    }
-    Ok(path.to_path_buf())
-}
-
-pub fn inspect_artifact(input: &str) -> Result<ArtifactReport, String> {
-    let path = PathBuf::from(input);
-    if !path.exists() {
-        return Err("Selected artifact does not exist".into());
-    }
-    let target = artifact_target(&path)?;
-    let bytes = fs::read(&target).map_err(|e| format!("Cannot hash artifact: {e}"))?;
-    let sha256 = hex::encode(Sha256::digest(bytes));
-    let (_, quarantine) = output(
-        "xattr",
-        &["-p", "com.apple.quarantine", &path.display().to_string()],
-    );
-    let (signature_valid, signature_text) = output(
-        "codesign",
-        &[
-            "--verify",
-            "--deep",
-            "--strict",
-            "--verbose=4",
-            &path.display().to_string(),
-        ],
-    );
-    let (_, details) = output(
-        "codesign",
-        &["-dv", "--verbose=4", &path.display().to_string()],
-    );
-    let team_id = details
-        .lines()
-        .find_map(|line| line.strip_prefix("TeamIdentifier="))
-        .map(str::to_string)
-        .filter(|value| value != "not set");
-    let identifier = details
-        .lines()
-        .find_map(|line| line.strip_prefix("Identifier="))
-        .map(str::to_string);
-    let authorities = details
-        .lines()
-        .filter_map(|line| line.strip_prefix("Authority="))
-        .map(str::to_string)
-        .collect();
-    let (_, entitlements_text) = output(
-        "codesign",
-        &["-d", "--entitlements", ":-", &path.display().to_string()],
-    );
-    let entitlements = entitlements_text
-        .lines()
-        .filter_map(|line| {
-            line.trim()
-                .strip_prefix("<key>")
-                .and_then(|value| value.strip_suffix("</key>"))
-                .map(str::to_string)
-        })
-        .collect();
-    let extension = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    let assessment_type = if extension == "pkg" {
-        "install"
-    } else {
-        "execute"
-    };
-    let (notarized, assessment) = output(
-        "spctl",
-        &[
-            "-a",
-            "-vv",
-            "--type",
-            assessment_type,
-            &path.display().to_string(),
-        ],
-    );
-    Ok(ArtifactReport {
-        path: path.display().to_string(),
-        kind: if extension.is_empty() {
-            "Mach-O or executable".into()
-        } else {
-            extension
-        },
-        sha256: sha256.clone(),
-        quarantined: !quarantine.is_empty(),
-        quarantine_value: (!quarantine.is_empty()).then_some(quarantine),
-        signature_valid,
-        notarized,
-        identifier,
-        team_id,
-        authorities,
-        entitlements,
-        detail: format!("Signature: {signature_text} · Assessment: {assessment}"),
-        reputation_url: format!("https://www.virustotal.com/gui/file/{sha256}"),
-    })
 }
 
 pub fn host_tools() -> Vec<HostTool> {

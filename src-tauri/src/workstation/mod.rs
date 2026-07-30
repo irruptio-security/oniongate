@@ -36,23 +36,6 @@ pub struct PersistenceReport {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArtifactReport {
-    pub path: String,
-    pub kind: String,
-    pub sha256: String,
-    pub quarantined: bool,
-    pub quarantine_value: Option<String>,
-    pub signature_valid: bool,
-    pub notarized: bool,
-    pub identifier: Option<String>,
-    pub team_id: Option<String>,
-    pub authorities: Vec<String>,
-    pub entitlements: Vec<String>,
-    pub detail: String,
-    pub reputation_url: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostTool {
     pub id: String,
     pub name: String,
@@ -109,18 +92,6 @@ pub fn save_persistence_baseline() -> Result<String, String> {
     #[cfg(not(target_os = "macos"))]
     {
         Err("Persistence baseline is currently implemented for macOS".into())
-    }
-}
-
-pub fn inspect_artifact(path: &str) -> Result<ArtifactReport, String> {
-    #[cfg(target_os = "macos")]
-    {
-        macos::inspect_artifact(path)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = path;
-        Err("Artifact Inspector is currently implemented for macOS".into())
     }
 }
 

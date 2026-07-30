@@ -1,0 +1,20 @@
+---
+description: Sidecar bundling and dependency pinning rules
+globs: scripts/**,src-tauri/binaries/**,src-tauri/build.rs
+alwaysApply: false
+---
+
+# Sidecars & dependency pinning
+
+- Every downloaded archive must have a pinned SHA-256 in
+  `scripts/dependencies.sha256`, verified from two independent upstream sources
+  before bumping. `download-deps.sh` refuses unpinned or mismatched archives.
+- Do not commit downloaded binaries. `src-tauri/binaries/*` is gitignored except
+  the README.
+- **Generated — do not hand-edit:** `src-tauri/binaries/README.md` and
+  `src-tauri/resources/licenses/THIRD_PARTY.md` are written by `download-deps.sh`.
+  Edit the script's heredocs instead.
+- Sidecars are staged as `<name>-<target-triple>` (plus a triple-less convenience
+  copy). `obfs4proxy` is an alias of `lyrebird`.
+- Bump versions via `TOR_BROWSER_VERSION` / `SINGBOX_VERSION` and update the hash
+  manifest in the same change.

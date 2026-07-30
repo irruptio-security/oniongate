@@ -1,0 +1,48 @@
+name: Bug report
+description: Report a non-security bug in OnionGate
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do **not** report security vulnerabilities here. Use a private
+        [GitHub Security Advisory](https://github.com/irruptio-security/oniongate/security/advisories/new)
+        instead (see SECURITY.md). Never paste onion keys, bridge lines, client
+        credentials, or unredacted logs.
+  - type: input
+    id: version
+    attributes:
+      label: OnionGate version
+      placeholder: e.g. 0.2.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows (experimental)
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What did you do?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs. actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted logs / context
+      description: Remove IP addresses, bridge lines, paths, and identifiers before pasting.
+    validations:
+      required: false
