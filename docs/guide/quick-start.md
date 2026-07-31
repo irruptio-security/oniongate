@@ -99,6 +99,7 @@ same live protection label as the app and provides:
 - **Connect Tor** or **Disconnect & restore**;
 - **New Identity** when Tor control is reachable;
 - **Emergency Restore** only when an interrupted session needs recovery;
+- shortcuts to Verify Protection, Onion Host, and Logs;
 - Open, Hide, and Quit.
 
 macOS uses a monochrome template icon that follows the menu-bar appearance.

@@ -64,6 +64,7 @@ export default defineConfig({
           items: [
             { text: "What OnionGate is", link: "/guide/" },
             { text: "Install", link: "/guide/install" },
+            { text: "Local installers and updates", link: "/guide/updates" },
             { text: "Quick start", link: "/guide/quick-start" },
           ],
         },

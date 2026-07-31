@@ -17,7 +17,7 @@ jobs:
     outputs:
       source_branch: ${{ steps.source.outputs.branch }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Require tag commit on main or staging
@@ -41,7 +41,7 @@ jobs:
 
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
           echo "Release source branch: $branch"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -63,6 +63,7 @@ jobs:
             rpm \
             cpio
       - run: npm ci
+      - run: npm run deps
       - run: node scripts/check-release.mjs "${GITHUB_REF_NAME}"
       - run: npm run typecheck
       - run: npm run fmt:check
@@ -85,10 +86,10 @@ jobs:
       release_id: ${{ steps.release.outputs.id }}
       version: ${{ steps.release.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
       - name: Validate synchronized versions and changelog
@@ -126,8 +127,8 @@ jobs:
           done
           version="${GITHUB_REF_NAME#v}"
           if [[ -z "$WINDOWS_CERTIFICATE" ]]; then
-            if [[ "$SOURCE_BRANCH" == staging || "$version" == 0.* || "$version" == *-* ]]; then
-              echo "::warning::Windows will be unsigned and must remain experimental"
+            if [[ "$SOURCE_BRANCH" == staging || "$version" == *-* ]]; then
+              echo "::warning::Windows will be an unsigned prerelease"
             else
               echo "::error::Stable releases require WINDOWS_CERTIFICATE"
               exit 1
@@ -149,7 +150,7 @@ jobs:
           if [[ "$SOURCE_BRANCH" == staging ]]; then
             prerelease=true
             title_suffix=" (staging)"
-          elif [[ "$version" == 0.* || "$version" == *-* ]]; then
+          elif [[ "$version" == *-* ]]; then
             prerelease=true
           fi
 
@@ -191,12 +192,12 @@ jobs:
             os: macos-15
             target: aarch64-apple-darwin
             extension: ""
-            bundles: dmg
+            bundles: app,dmg
           - name: macOS Intel
             os: macos-15-intel
             target: x86_64-apple-darwin
             extension: ""
-            bundles: dmg
+            bundles: app,dmg
           - name: Linux x86_64
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
@@ -211,8 +212,8 @@ jobs:
       WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
       WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -260,7 +261,7 @@ jobs:
             test -n "$APPLE_API_KEY_BASE64" || { echo "::error::Missing APPLE_API_KEY_BASE64"; exit 1; }
           fi
           if [[ "$RUNNER_OS" == "Windows" && -z "$WINDOWS_CERTIFICATE" ]]; then
-            echo "::warning::Windows artifact is unsigned and must remain experimental"
+            echo "::warning::Windows artifact is unsigned and prerelease-only"
           fi
       - name: Build and stage privileged helper
         shell: bash
@@ -408,10 +409,10 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -466,7 +467,7 @@ jobs:
         uses: actions/attest-build-provenance@v3
         with:
           subject-path: release-assets/*
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-evidence-${{ github.ref_name }}
           if-no-files-found: error

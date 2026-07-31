@@ -5,7 +5,16 @@
 <h1 align="center">OnionGate</h1>
 
 <p align="center">
-  <b>A Tor workstation toolkit for macOS, partial Linux, and experimental Windows.</b>
+  <b>A Tor workstation toolkit for macOS, Linux, and Windows.</b>
+</p>
+
+<p align="center">
+  <a href="https://github.com/irruptio-security/oniongate/releases">
+    <img src="https://img.shields.io/github/downloads/irruptio-security/oniongate/total?label=downloads" alt="Total release downloads" />
+  </a>
+  <a href="https://github.com/irruptio-security/oniongate">
+    <img src="https://img.shields.io/endpoint?url=https%3A%2F%2Firruptio-security.github.io%2Foniongate%2Fmetrics%2Fclones.json" alt="Repository clones in the last 14 days" />
+  </a>
 </p>
 
 OnionGate is a desktop app that routes individual applications through isolated
@@ -106,6 +115,7 @@ The full site is at
 
 - [Getting started](docs/guide/index.md)
 - [Quick start](docs/guide/quick-start.md)
+- [Local installers and updates](docs/guide/updates.md)
 - [Connect and route traffic](docs/guide/connection.md)
 - [Use bridges](docs/guide/bridges.md)
 - [Route applications](docs/guide/apps.md)

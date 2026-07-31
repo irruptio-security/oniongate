@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import {
   Globe,
   Home,
@@ -47,6 +48,28 @@ export default function App() {
   const [collapsed, setCollapsed] = useState<boolean>(() =>
     readSidebarCollapsed(),
   );
+
+  useEffect(() => {
+    let disposed = false;
+    let stopListening: (() => void) | undefined;
+    void listen<string>("tray:navigate", ({ payload }) => {
+      if (payload === "verify") {
+        app.setTab("verify");
+      } else if (payload === "host") {
+        app.setTab("host");
+      } else if (payload === "logs") {
+        app.setSettingsView("logs");
+        app.setTab("settings");
+      }
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else stopListening = unlisten;
+    });
+    return () => {
+      disposed = true;
+      stopListening?.();
+    };
+  }, [app.setSettingsView, app.setTab]);
 
   const toggleSidebar = () =>
     setCollapsed((prev) => {

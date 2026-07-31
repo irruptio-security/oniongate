@@ -62,13 +62,24 @@ passes its path to Tauri. Apple notarization and stapling happen automatically.
 
 ## Windows
 
-Windows remains experimental until an Authenticode certificate is available:
+Stable Windows distribution requires an Authenticode certificate:
 
 - `WINDOWS_CERTIFICATE`: base64 of an exportable `.pfx`
 - `WINDOWS_CERTIFICATE_PASSWORD`: `.pfx` password
 
-Without these secrets, release CI emits an explicit warning and creates only an
-unsigned experimental Windows artifact.
+Without these secrets, staging or hyphenated-version CI may create a clearly
+labeled unsigned prerelease. Normal `main` release tags fail.
+
+## README clone badge
+
+GitHub exposes release downloads publicly but keeps clone traffic private. The
+daily docs workflow uses:
+
+- `TRAFFIC_TOKEN`: a fine-grained PAT limited to this repository with
+  **Administration: Read**.
+
+Only the aggregate 14-day clone count is published. The default `GITHUB_TOKEN`
+cannot access the Traffic API.
 
 ## Privileged helper (bundling + signing)
 

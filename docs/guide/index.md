@@ -5,17 +5,17 @@ Tor circuits, turns a local port into an onion site, and checks whether its live
 routing controls and egress are behaving as expected. It bundles and manages
 Tor for you, so no terminal work is required.
 
-macOS is the primary workstation target, Linux has partial desktop integration,
-and Windows is experimental. Read the
-[platform matrix](/reference/platform-support) before choosing a protection
-boundary. A headless [command-line companion](/guide/cli) supports connection
-to managed Tor and permanent onion hosting, with documented pre-stable limits.
+OnionGate supports macOS, Linux x86_64, and Windows x86_64, plus Apple Silicon
+and Intel Macs. Platform-specific system integrations are listed in the
+[platform matrix](/reference/platform-support). The headless
+[command-line companion](/guide/cli) focuses on managed Tor and permanent onion
+hosting.
 
 ## What you can do with it
 
-**Route apps through Tor.** Give each application its own isolated circuit. A
-fail-closed Session Guard suspends protected apps instead of leaking if Tor
-drops.
+**Route apps through Tor.** Selected TUN-routed applications receive distinct
+Tor circuit contexts. On macOS and Linux, Session Guard can also suspend matched
+processes if that route drops.
 
 See [Connect and route traffic](/guide/connection) and
 [Route applications](/guide/apps) for the boundary and platform limitations.
@@ -43,7 +43,6 @@ application firewall. Specifically, it does **not**:
 - make an unsafe application protocol anonymous;
 - contain malware or replace endpoint security;
 - tunnel UDP, which is blocked rather than leaked.
-- make Windows a stable fail-closed platform;
 - prove that every process or packet followed the intended route.
 
 Read the [threat model](/reference/threat-model) before relying on it for

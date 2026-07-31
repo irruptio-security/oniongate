@@ -5,9 +5,10 @@ The **System** tab covers the computer OnionGate runs on, in three views:
 watches what runs on its own. Anything that configures OnionGate itself lives
 under **Settings** instead.
 
-The tab is visible on every platform, but Checkup, Startup Items, and current
-hardening controls are implemented only on macOS. Other platforms show
-unavailable/placeholder states; follow the [platform matrix](/reference/platform-support).
+These host-audit utilities currently target macOS. Linux and Windows retain the
+full Connect, Apps, Host, Verify, and Settings workflows while OS preference
+management stays with their native system tools. See the
+[platform matrix](/reference/platform-support).
 
 ## Checkup
 

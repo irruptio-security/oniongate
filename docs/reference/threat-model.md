@@ -37,8 +37,8 @@ OnionGate aims to:
 - Protecting a local onion service that is itself vulnerable.
 - Guaranteeing that a moved, renamed, helper, or child process still matches a
   stored selected-application identity.
-- Stable fail-closed protection on Windows; Windows remains experimental and
-  Session Guard process suspension is not implemented there.
+- Session Guard process suspension on Windows. Windows still uses TUN,
+  selected-app rules, and the Defender Firewall kill switch.
 
 ## Modes
 
@@ -131,9 +131,8 @@ currently accepts only ping and fixed kill-switch enable/disable requests. There
 is no arbitrary command, path, or caller-supplied rule operation.
 
 On Unix the service is configured for the installing user's UID. Windows pipe
-authorization and release packaging remain experimental; the helper must not be
-treated as part of a stable protection boundary until the signed artifact and
-client authentication have been independently reviewed.
+client authentication and signed helper packaging require independent review
+before the helper becomes part of a stable protection boundary.
 
 Pre-stable hardening debt remains: the helper binary links the main application
 library instead of a minimal protocol/policy crate, and macOS authenticates the

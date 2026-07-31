@@ -3,7 +3,7 @@
 
 .PHONY: help setup install deps \
 	start dev run build build-frontend preview \
-	icons \
+	downloads icons \
 	check typecheck test lint fmt fmt-check audit release-check release-bundle-local sidecar-sbom \
 	docs docs-build docs-preview \
 	clean clean-rust clean-deps clean-docs
@@ -48,6 +48,8 @@ preview: ## Serve the built frontend (vite preview)
 
 build: deps ## Build a release app bundle (Tauri)
 	$(NPM) run tauri build
+
+downloads: release-bundle-local ## Build local installer/download files for this OS
 
 build-frontend: ## Typecheck and build the Vite frontend only
 	$(NPM) run build

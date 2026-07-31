@@ -179,6 +179,7 @@ export function HardenPage({ app }: { app: TorApp }) {
   const os = detect?.os ?? "";
   const isMac = os === "macos";
   const isLinux = os === "linux";
+  const isWindows = os === "windows";
 
   const [killStatus, setKillStatus] = useState<KillSiriStatus | null>(null);
   const [ports, setPorts] = useState<MacPortsStatus | null>(null);
@@ -234,7 +235,13 @@ export function HardenPage({ app }: { app: TorApp }) {
     });
   };
 
-  const platformBadge = isMac ? "macOS" : isLinux ? "Linux" : "Unknown";
+  const platformBadge = isMac
+    ? "macOS"
+    : isLinux
+      ? "Linux"
+      : isWindows
+        ? "Windows"
+        : "Unknown";
 
   return (
     <section className="flex flex-col gap-3">
@@ -259,11 +266,11 @@ export function HardenPage({ app }: { app: TorApp }) {
       {isLinux ? (
         <div className="rounded-lg border border-line bg-panel px-4 py-6 text-center">
           <p className="text-sm font-medium text-ink">
-            Linux hardening is on the way
+            No additional Linux OS controls
           </p>
           <p className="mx-auto mt-1 max-w-sm text-xs text-muted">
-            Per-distro options (firewall, telemetry, mDNS, and sharing toggles)
-            are being finalized and will appear here.
+            Tor, TUN, the kill switch, hosting, and verification are available.
+            System-wide privacy preferences remain managed by your distribution.
           </p>
         </div>
       ) : null}
@@ -404,9 +411,15 @@ export function HardenPage({ app }: { app: TorApp }) {
       ) : null}
 
       {!isMac && !isLinux ? (
-        <p className="text-sm text-muted">
-          No hardening options for this platform.
-        </p>
+        <div className="rounded-lg border border-line bg-panel px-4 py-6 text-center">
+          <p className="text-sm font-medium text-ink">
+            No additional OS controls
+          </p>
+          <p className="mx-auto mt-1 max-w-sm text-xs text-muted">
+            Tor, TUN, the kill switch, hosting, and verification are available.
+            System privacy preferences remain managed by your operating system.
+          </p>
+        </div>
       ) : null}
 
     </section>

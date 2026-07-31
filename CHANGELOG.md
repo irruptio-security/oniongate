@@ -23,6 +23,8 @@ OnionGate uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - macOS Checkup, hardening controls, and startup-item baselines.
 - Optional typed privileged helper for fixed kill-switch operations.
 - Native menu-bar/system-tray controls on macOS, Linux, and Windows.
+- Tray shortcuts for Verify, Onion Host, and Logs, plus a `make downloads`
+  command for native local installer bundles.
 - VitePress documentation site, platform matrix, threat model, privacy/data
   inventory, release process, and GitHub Pages deployment.
 - Cursor-assisted release changelog preparation with enforced version and
@@ -60,8 +62,8 @@ OnionGate uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Known limitations
 
-- There is no stable audited release yet; Windows and CLI protected-session
-  orchestration remain experimental.
+- There is no stable audited release yet. Windows does not include Session Guard
+  process suspension, and CLI protected-session orchestration remains limited.
 - The privileged helper still requires minimal-crate and client-identity
   hardening before a stable release.
 - Linux AArch64 cannot bundle Tor until an official expert bundle is available.

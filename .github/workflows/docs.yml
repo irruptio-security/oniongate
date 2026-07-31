@@ -15,6 +15,8 @@ on:
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/docs.yml"
+  schedule:
+    - cron: "23 4 * * *"
   workflow_dispatch:
 
 permissions:
@@ -28,24 +30,58 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # lastUpdated timestamps come from git history.
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
       - run: npm run docs:build
-      - uses: actions/upload-pages-artifact@v3
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+      - name: Generate 14-day clone badge
+        if: >-
+          github.ref == 'refs/heads/main' &&
+          github.event_name != 'pull_request' &&
+          github.event.repository.private == false
+        env:
+          TRAFFIC_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          target="docs/.vitepress/dist/metrics/clones.json"
+          mkdir -p "$(dirname "$target")"
+          if [[ -z "$TRAFFIC_TOKEN" ]]; then
+            echo "::notice::TRAFFIC_TOKEN is not configured; clone badge will show setup required"
+            exit 0
+          fi
+          count="$(
+            GH_TOKEN="$TRAFFIC_TOKEN" \
+              gh api "repos/$REPO/traffic/clones" --jq .count
+          )"
+          jq --null-input \
+            --arg message "$count" \
+            '{
+              schemaVersion: 1,
+              label: "clones (14d)",
+              message: $message,
+              color: "blue"
+            }' > "$target"
+      - uses: actions/upload-pages-artifact@v5
+        if: >-
+          github.ref == 'refs/heads/main' &&
+          github.event_name != 'pull_request' &&
+          github.event.repository.private == false
         with:
           path: docs/.vitepress/dist
 
   deploy:
     needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name != 'pull_request' &&
+      github.event.repository.private == false
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -55,9 +91,8 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      # Enables Pages on the first run, so publishing needs no manual setup.
-      - uses: actions/configure-pages@v5
-        with:
-          enablement: true
+      # Pages must be enabled once by a repository admin after the repository
+      # becomes public. Workflow tokens cannot perform that owner-level setup.
+      - uses: actions/configure-pages@v6
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

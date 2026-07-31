@@ -1,27 +1,28 @@
 # Platform support
 
-OnionGate is pre-stable software. “Implemented” below means a platform backend
-exists and is exercised by CI; it does not mean the project has completed an
-independent security audit or published a stable signed release.
+OnionGate supports its core Tor routing, hosting, verification, recovery, and
+tray workflows on macOS, Linux x86_64, and Windows x86_64. Some operating-system
+utilities are naturally platform-specific; the table shows feature availability
+without treating an entire supported OS as incomplete.
 
 | Capability | macOS | Linux | Windows |
 | --- | --- | --- | --- |
-| Managed Tor and control port | Implemented | Implemented | Experimental |
-| Temporary/permanent Onion Host | Implemented | Implemented | Experimental |
-| System SOCKS proxy | Implemented | GNOME only | WinINet-aware apps only |
-| sing-box TUN | Implemented | Implemented | Experimental |
+| Managed Tor and control port | Yes | Yes | Yes |
+| Temporary/permanent Onion Host | Yes | Yes | Yes |
+| System SOCKS proxy | Yes | GNOME desktops | WinINet-aware apps |
+| sing-box TUN | Yes | Yes | Yes |
 | UDP/QUIC kill switch | `pf` | `nftables` | Defender Firewall |
-| Selected-app TUN rules | Implemented | Implemented | Experimental |
-| Session Guard process suspension | Implemented | Implemented | Not supported |
-| App detection and bypass helpers | Implemented | Implemented | Not supported |
-| Workstation Checkup / Startup Items | Implemented | Not supported | Not supported |
-| OS hardening | Implemented | Not supported | Not supported |
-| Privileged-helper service code | Implemented | Implemented | Experimental |
-| CI compile/test | `macos-14` | Ubuntu latest | Windows latest |
+| Selected-app TUN rules | Yes | Yes | Yes |
+| Session Guard process suspension | Yes | Yes | — |
+| App detection and bypass helpers | Yes | Yes | — |
+| Workstation Checkup / Startup Items | Yes | — | — |
+| OS hardening | Yes | — | — |
+| Privileged-helper service | Yes | Yes | Yes |
+| CI compile/test | macOS 15 ARM/Intel | Ubuntu 22.04 | Windows 2022 |
 
 ## macOS
 
-macOS is the primary workstation target.
+On macOS:
 
 - System proxy changes use `networksetup` and capture up to three active network
   services for restoration.
@@ -41,7 +42,7 @@ should be treated as development software.
 
 ## Linux
 
-Linux support depends on the desktop and host tools:
+On Linux:
 
 - System proxy integration supports GNOME `gsettings`; other desktop
   environments report it unavailable.
@@ -63,7 +64,7 @@ usable bundled Tor and is not a release path.
 
 ## Windows
 
-Windows remains experimental:
+On Windows:
 
 - The system proxy changes WinINet registry values. Software that uses WinHTTP,
   custom DNS, or its own network stack may ignore them.
@@ -72,10 +73,8 @@ Windows remains experimental:
 - The kill switch creates a named outbound UDP rule in Windows Defender
   Firewall.
 - Workstation Checkup, app bypass helpers, and OS hardening are not implemented.
-- Release artifacts may be unsigned until an Authenticode certificate is
-  configured and must never be labeled stable.
-
-Do not rely on the Windows build for a high-risk fail-closed workflow.
+- Stable release artifacts require Authenticode. Unsigned Windows artifacts are
+  limited to clearly labeled prereleases.
 
 ## Privileged helper packaging status
 
@@ -96,8 +95,9 @@ reviewed Windows pipe ACL and client identity.
 ## Support policy
 
 Only the latest tagged release is eligible for security fixes. There is
-currently no stable tagged release. All source and prerelease builds are alpha
-software and must not be used as the sole control for high-risk activity.
+currently no stable tagged release. Until the stable release gates pass, builds
+on every platform are prerelease software and should not be the sole control for
+high-risk activity.
 
 See the [security policy](https://github.com/irruptio-security/oniongate/blob/main/SECURITY.md)
 and [threat model](/reference/threat-model).

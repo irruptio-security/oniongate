@@ -105,8 +105,8 @@ Once a protected session is active, OnionGate checks Tor SOCKS and the TUN
 process each second. If either disappears, it sends a stop signal to matching
 selected processes. It resumes only process IDs that OnionGate itself suspended.
 
-Current process suspension is implemented for macOS and Linux. Windows builds
-are experimental and must not be treated as providing this guarantee.
+Process suspension is available on macOS and Linux. Windows supports the
+selected-app TUN policy but does not add this process-suspension layer.
 
 ::: warning Process matching has limits
 OnionGate prefers the chosen executable path and falls back to process name.

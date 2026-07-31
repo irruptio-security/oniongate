@@ -57,7 +57,11 @@ fn os_name() -> &'static str {
     {
         "linux"
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(target_os = "windows")]
+    {
+        "windows"
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         "other"
     }
@@ -67,6 +71,7 @@ fn os_label() -> String {
     match os_name() {
         "macos" => "macOS".into(),
         "linux" => "Linux".into(),
+        "windows" => "Windows".into(),
         _ => "Unsupported".into(),
     }
 }

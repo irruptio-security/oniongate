@@ -34,12 +34,6 @@ features:
 
 ## Not a replacement for Tor Browser
 
-OnionGate is **not** a VPN, Tor Browser, Tails, or Whonix. It does not stop
-browser fingerprinting or global traffic correlation. Read the
-[threat model](/reference/threat-model) before relying on it for sensitive work.
-
-macOS is the primary workstation target. Linux integration is partial and
-Windows is experimental. See [platform support](/reference/platform-support).
-
-OnionGate has no stable release yet. Source builds and prereleases are alpha
-software and must not be the sole control for high-risk activity.
+OnionGate supports macOS, Linux, and Windows. It is not a VPN or a replacement
+for Tor Browser, Tails, or Whonix. Review [platform support](/reference/platform-support)
+and the [threat model](/reference/threat-model) before sensitive use.

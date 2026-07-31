@@ -119,9 +119,10 @@ appropriate sudo policy).
 
 ### Windows
 
-Windows is experimental. The WinINet proxy does not cover every application,
-and Session Guard process suspension is unavailable. Unsigned artifacts must
-not be labeled stable or used for high-risk workflows.
+Windows supports managed Tor, Onion Host, TUN routing, selected-app rules, and
+the Defender Firewall kill switch. The system proxy covers WinINet-aware
+applications; use TUN for broader coverage. Session Guard process suspension is
+a macOS/Linux-only extra. Stable Windows installers require Authenticode.
 
 See the complete [platform support matrix](/reference/platform-support).
 

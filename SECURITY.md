@@ -36,8 +36,8 @@ within 7 days, and coordinate publication after a fix is available.
   security updates.
 - The Verify report inspects egress and live configuration/state; it is not a
   packet capture or proof that every application followed policy.
-- Windows remains experimental and does not implement Session Guard process
-  suspension.
+- Session Guard process suspension is available on macOS/Linux; Windows uses
+  the same TUN/app policy without that additional suspension layer.
 - The optional root helper currently accepts only typed kill-switch operations,
   but its packaging and client-authentication hardening remain pre-stable.
 

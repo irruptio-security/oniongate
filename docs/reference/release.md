@@ -1,8 +1,9 @@
 # Release process
 
 OnionGate has not published a stable release. The workflow intentionally creates
-a **draft** first so artifacts can be inspected before publication. Version
-`0.x` and hyphenated versions are also marked prerelease.
+a **draft** first so artifacts can be inspected before publication. Staging
+releases and hyphenated semantic versions are marked prerelease; a plain version
+from `main` can become the normal updater channel after review.
 
 ## Cursor changelog gate
 
@@ -55,8 +56,9 @@ The metadata job requires all four updater platform keys, then:
 - publishes GitHub build-provenance attestations;
 - uploads all evidence as release assets and a retained workflow artifact.
 
-macOS credentials and the Tauri updater key are mandatory. Windows may build
-without Authenticode only while Windows remains explicitly experimental.
+macOS credentials and the Tauri updater key are mandatory. Unsigned Windows
+artifacts are allowed only for clearly labeled prereleases; stable tags require
+Authenticode.
 
 Publishing a non-prerelease triggers a separate post-publish check of the public
 `releases/latest/download/latest.json` endpoint, release checksums, and GitHub
@@ -159,3 +161,15 @@ decision before then.
 Documentation is independent of application releases. A push to `main` that
 changes `docs/`, package manifests, or the docs workflow builds VitePress and
 deploys it to GitHub Pages. Pull requests build the site without deploying it.
+
+While the repository is private on GitHub Free, docs remain build-only because
+Pages is unavailable. After making the repository public, a repository admin
+must enable **Settings → Pages → Source: GitHub Actions** once, then rerun the
+Docs workflow. The workflow token deliberately does not attempt this owner-level
+setup. Staging builds validate docs but never deploy them.
+
+The README download badge uses GitHub's public release-asset totals. The clone
+badge is refreshed daily from GitHub's private 14-day Traffic API and publishes
+only the aggregate count through Pages. It requires a fine-grained
+`TRAFFIC_TOKEN` Actions secret scoped to this repository with
+**Administration: Read**. The default workflow token cannot read traffic data.

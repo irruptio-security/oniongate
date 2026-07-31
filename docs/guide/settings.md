@@ -95,8 +95,8 @@ Administrator access may be needed for:
 - system proxy changes on platforms that require elevation;
 - selected OS-hardening controls.
 
-Cancelling a prompt prevents a **Protected** result. A safer partial component
-such as TUN may remain active while the journal is marked **Degraded** so
+Cancelling a prompt prevents a **Protected** result. TUN may remain active while
+the journal is marked **Degraded** so
 captured traffic is not dropped onto a direct route; retry the failed control or
 Disconnect to clean up. OnionGate does not silently label the weaker state
 protected.
@@ -110,6 +110,9 @@ update, and relaunches.
 Until the project publishes its first signed release, build from source. A
 missing or invalid updater signature must be treated as a failed update, not
 bypassed.
+
+See [Local installers and updates](/guide/updates) for local DMG/EXE/package
+builds, release preparation, and stable-versus-staging update behavior.
 
 ## Logs
 

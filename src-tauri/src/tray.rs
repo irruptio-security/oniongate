@@ -8,7 +8,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Manager, Runtime,
+    AppHandle, Emitter, Manager, Runtime,
 };
 
 const TRAY_ID: &str = "oniongate-tray";
@@ -132,6 +132,10 @@ pub fn setup<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
     )?;
     let action_sep = PredefinedMenuItem::separator(app)?;
     let show = MenuItem::with_id(app, "show", "Open OnionGate", true, None::<&str>)?;
+    let open_verify =
+        MenuItem::with_id(app, "open_verify", "Verify Protection…", true, None::<&str>)?;
+    let open_host = MenuItem::with_id(app, "open_host", "Onion Host…", true, None::<&str>)?;
+    let open_logs = MenuItem::with_id(app, "open_logs", "View Logs…", true, None::<&str>)?;
     let hide = MenuItem::with_id(app, "hide", "Hide Window", true, None::<&str>)?;
     let quit_sep = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Quit OnionGate", true, None::<&str>)?;
@@ -144,6 +148,9 @@ pub fn setup<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
             &restore,
             &action_sep,
             &show,
+            &open_verify,
+            &open_host,
+            &open_logs,
             &hide,
             &quit_sep,
             &quit,
@@ -239,6 +246,9 @@ pub fn setup<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
                 });
             }
             "show" => show_main(app),
+            "open_verify" => show_view(app, "verify"),
+            "open_host" => show_view(app, "host"),
+            "open_logs" => show_view(app, "logs"),
             "hide" => hide_main(app),
             "quit" => app.exit(0),
             _ => {}
@@ -294,6 +304,11 @@ fn show_main<R: Runtime>(app: &AppHandle<R>) {
         let _ = window.unminimize();
         let _ = window.set_focus();
     }
+}
+
+fn show_view<R: Runtime>(app: &AppHandle<R>, view: &str) {
+    show_main(app);
+    let _ = app.emit("tray:navigate", view);
 }
 
 fn hide_main<R: Runtime>(app: &AppHandle<R>) {
