@@ -56,9 +56,26 @@ The metadata job requires all four updater platform keys, then:
 - publishes GitHub build-provenance attestations;
 - uploads all evidence as release assets and a retained workflow artifact.
 
-macOS credentials and the Tauri updater key are mandatory. Unsigned Windows
-artifacts are allowed only for clearly labeled prereleases; stable tags require
-Authenticode.
+The draft is published only after every artifact, checksum, SBOM, and
+attestation is uploaded, so a tag is never briefly downloadable without its
+verification material.
+
+## Signing posture by version
+
+The Tauri updater key is always mandatory: it costs nothing to generate and it
+is what signs `latest.json` and `SHA256SUMS`. OS-vendor signing is gated on the
+version instead, because Apple notarization and Authenticode both require paid
+enrollment:
+
+| Tag | Apple signing | Authenticode | Result |
+| --- | --- | --- | --- |
+| `0.x` | optional | optional | Publishes; unsigned platforms get a warning banner in the release notes |
+| `1.0.0`+ | required | required | Release CI fails the tag if either is missing |
+| any `-suffix`, or a `staging` tag | optional | optional | Marked prerelease, never Latest |
+
+When a platform is unsigned, CI prepends an explicit warning to the release
+notes, skips the notarization and Authenticode assertions for that platform, and
+still enforces bundle contents, checksums, SBOMs, and provenance.
 
 Publishing a non-prerelease triggers a separate post-publish check of the public
 `releases/latest/download/latest.json` endpoint, release checksums, and GitHub
@@ -69,14 +86,14 @@ attestations. A failed post-publish check is a release incident.
 The workflow still does **not**:
 
 - run quarantined-install smoke tests on fresh VMs;
-- publish the draft or mark it Latest without human artifact review;
+- apply Apple notarization or Authenticode, which 1.0 will require;
 - give CLI `start` the same verified TUN/firewall/proxy orchestration and
   long-running session ownership as the desktop app;
 - provide manageable cross-process lifecycle for CLI-created temporary sites.
 - complete the helper's minimal-crate and client code-signature hardening.
 
-Consequently, artifacts remain draft/prerelease until the manual gates below are
-completed and must not be described as stable or production-ready.
+Consequently, 0.x artifacts must not be described as stable or
+production-ready.
 
 ## Updater trust root
 
@@ -92,6 +109,8 @@ Replacing the public key casually breaks the update chain. Never commit either
 the private key or password.
 
 ## Platform credentials
+
+These are optional for `0.x` and mandatory from `1.0.0` onward.
 
 macOS requires:
 
@@ -149,8 +168,8 @@ Before publishing a stable tag:
     Onion Host, client authorization, and updater behavior.
 11. Verify `latest.json` contains macOS ARM64/Intel, Linux x86_64, and Windows
     x86_64 entries with valid signatures.
-12. Publish the draft only after all gates pass; mark Latest only for a stable
-    release.
+12. Confirm CI published the release and marked it Latest, then re-verify the
+    public download endpoints.
 
 GitHub's `macos-15-intel` runner is scheduled to retire in August 2027. Intel
 macOS releases need a replacement build runner or an explicit end-of-support
@@ -162,11 +181,16 @@ Documentation is independent of application releases. A push to `main` that
 changes `docs/`, package manifests, or the docs workflow builds VitePress and
 deploys it to GitHub Pages. Pull requests build the site without deploying it.
 
-While the repository is private on GitHub Free, docs remain build-only because
-Pages is unavailable. After making the repository public, a repository admin
-must enable **Settings → Pages → Source: GitHub Actions** once, then rerun the
-Docs workflow. The workflow token deliberately does not attempt this owner-level
-setup. Staging builds validate docs but never deploy them.
+Pages must be enabled once by a repository admin, because the workflow token
+cannot perform that owner-level setup:
+
+```bash
+gh api -X POST repos/irruptio-security/oniongate/pages -f build_type=workflow
+```
+
+The equivalent UI path is **Settings → Pages → Source: GitHub Actions**. Only
+the canonical repository deploys; forks and staging builds validate the docs
+without publishing them.
 
 The README download badge uses GitHub's public release-asset totals. The clone
 badge is refreshed daily from GitHub's private 14-day Traffic API and publishes

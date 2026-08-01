@@ -7,17 +7,44 @@ Changelog generation is intentionally manual through the project
 `release-changelog` Cursor skill. Release CI only validates the committed
 result, so no Cursor API key is stored in GitHub.
 
+## What is required when
+
+| Secret group | `0.x` tags | `1.0.0`+ stable tags |
+| --- | --- | --- |
+| Tauri updater | required | required |
+| macOS Developer ID + notarization | optional | required |
+| Windows Authenticode | optional | required |
+| `TRAFFIC_TOKEN` | optional | optional |
+
+Omitting an optional group on a `0.x` tag publishes that platform unsigned and
+adds a warning banner to the release notes. Release CI fails a `1.0.0` or later
+stable tag that is missing either vendor-signing group.
+
 ## Tauri updater
 
 The first release establishes the updater trust root. Back up the private key
 and password offline; losing them means existing installations cannot verify
 future updates.
 
-- `TAURI_SIGNING_PRIVATE_KEY`: contents of `.tauri/oniongate-updater.key`
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: contents of
-  `.tauri/updater-key-password`
+- `TAURI_SIGNING_PRIVATE_KEY`: contents of the generated `.key` file
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: the password used to generate it
 
-The matching public key is embedded in `src-tauri/tauri.conf.json`.
+Generate a keypair outside the repository so it can never be committed:
+
+```bash
+mkdir -p ~/.oniongate-release && chmod 700 ~/.oniongate-release
+openssl rand -base64 33 | tr -d '\n=+/' > ~/.oniongate-release/updater.password
+npm run tauri -- signer generate --ci --force \
+  --password "$(cat ~/.oniongate-release/updater.password)" \
+  --write-keys ~/.oniongate-release/updater.key
+
+gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.oniongate-release/updater.key
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD < ~/.oniongate-release/updater.password
+```
+
+Copy the contents of `~/.oniongate-release/updater.key.pub` into the `pubkey`
+field of `src-tauri/tauri.conf.json`. That public key is the only part that
+belongs in the repository.
 
 ## macOS Developer ID signing
 
@@ -67,8 +94,8 @@ Stable Windows distribution requires an Authenticode certificate:
 - `WINDOWS_CERTIFICATE`: base64 of an exportable `.pfx`
 - `WINDOWS_CERTIFICATE_PASSWORD`: `.pfx` password
 
-Without these secrets, staging or hyphenated-version CI may create a clearly
-labeled unsigned prerelease. Normal `main` release tags fail.
+Without these secrets, `0.x` tags publish a clearly labeled unsigned Windows
+installer. Stable `1.0.0` or later tags fail.
 
 ## README clone badge
 

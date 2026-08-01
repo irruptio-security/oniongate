@@ -2,34 +2,43 @@
 
 ## Current release status
 
-OnionGate has not published a stable release. Treat source builds and any future
-draft/prerelease artifacts as alpha software. Do not rely on them for high-risk
-activity.
+OnionGate is pre-1.0. Treat every published artifact as alpha software and do
+not rely on it for high-risk activity.
 
-When signed artifacts become available, use only the
+Download only from the
 [official releases page](https://github.com/irruptio-security/oniongate/releases).
-A production release is expected to bundle Tor, sing-box, lyrebird, obfs4proxy,
-and the required runtime resources.
+A release bundles Tor, sing-box, lyrebird, obfs4proxy, and the required runtime
+resources.
 
 Primary downloads:
 
 | Platform | Install asset |
 | --- | --- |
 | macOS Apple Silicon / Intel | `.dmg` containing `OnionGate.app`; open it and drag the app to Applications |
-| Windows x86_64 | Authenticode-signed NSIS `-setup.exe` installer |
+| Windows x86_64 | NSIS `-setup.exe` installer |
 | Linux x86_64 | `.AppImage`, with `.deb` and `.rpm` packages for supported distributions |
 
 Files such as `OnionGate.app.tar.gz`, `.sig`, and `latest.json` are signed
 in-app-updater support assets, not the normal manual installer.
 
-Before running a downloaded artifact:
+## Pre-1.0 builds are not OS-vendor signed
 
-::: warning No artifact has been published yet
-Release CI now prepares signed draft installers, checksums, SBOMs, and
-provenance, but a maintainer must test and publish the draft. These commands
-apply only after assets appear on the official Releases page. Do not treat a
-draft or prerelease as production-ready because one check happens to pass.
-:::
+Apple notarization and Windows Authenticode require paid vendor programs that
+this project has not yet enrolled in. Until then:
+
+- **macOS** builds are unsigned and un-notarized. Gatekeeper blocks the first
+  launch.
+- **Windows** builds are unsigned. SmartScreen warns on first run.
+- **Linux** packages are unaffected, because the distribution model does not
+  depend on a vendor certificate.
+
+Release CI refuses to publish a `1.0.0` or later stable release unless every
+platform is properly signed, so this gap cannot silently outlive 0.x.
+
+Because the OS will not vouch for these builds, the checksum and provenance
+checks below are the real trust anchor. Do not skip them.
+
+## Verify before you run
 
 ```bash
 # macOS
@@ -39,7 +48,11 @@ shasum -a 256 -c SHA256SUMS --ignore-missing
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 
-Also verify the platform signature:
+`SHA256SUMS.sig` is a minisign signature over that manifest, made with the same
+key that signs updater payloads. The matching public key is the `pubkey` value
+in `src-tauri/tauri.conf.json`.
+
+On a signed release, also verify the platform signature:
 
 - macOS:
   ```bash
@@ -56,6 +69,18 @@ Also verify the platform signature:
 
 If a checksum, signature, SBOM, or provenance promised by the release notes is
 missing, stop rather than bypassing the check.
+
+## First launch on an unsigned build
+
+Verify the checksum and attestation first. Only then:
+
+- **macOS**: right-click `OnionGate.app` in Applications, choose **Open**, then
+  confirm. If macOS still refuses, clear the download quarantine flag for that
+  one app rather than weakening Gatekeeper globally:
+  ```bash
+  xattr -d com.apple.quarantine /Applications/OnionGate.app
+  ```
+- **Windows**: on the SmartScreen prompt choose **More info → Run anyway**.
 
 When GitHub CLI is available, verify the build attestation too:
 

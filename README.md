@@ -49,12 +49,16 @@ terminal required — and ships a headless CLI for servers and scripts.
 
 ## Install
 
-There is no stable release yet. Source builds and any prereleases are alpha
-software and must not be relied on for high-risk activity.
+OnionGate is pre-1.0. Every published build is alpha software and must not be
+relied on for high-risk activity.
 
-When official signed artifacts become available, download them only from the
-GitHub Releases page and verify their checksum, platform signature, SBOM, and
-provenance before running them.
+Download only from the
+[GitHub Releases page](https://github.com/irruptio-security/oniongate/releases),
+and verify the checksum, SBOM, and provenance before running anything.
+
+Pre-1.0 macOS and Windows builds are **not** signed with an OS vendor
+certificate, so Gatekeeper and SmartScreen will warn on first launch. Release CI
+blocks any `1.0.0` or later stable release that is not fully signed.
 
 Full instructions, including building from source, are in the
 [install guide](docs/guide/install.md).

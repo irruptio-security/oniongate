@@ -57,7 +57,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU5MTU3N0M3REQ0NUY3N0MKUldSODkwWGR4M2NWNlNTUzl5c2JJRWtUY05sMGJtQVU1aDRLMXU5VlQ1OTRtZkM5ZHdUeXhRaFQK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM2RDA4MkM5MkI1QTJGMzYKUldRMkwxb3J5WUxReGx6d09wZUpmbXcxWkxjRzllYTRTM3JhczdYRGVKVmh3LzU0anVsOFlPN1YK",
       "endpoints": [
         "https://github.com/irruptio-security/oniongate/releases/latest/download/latest.json"
       ]

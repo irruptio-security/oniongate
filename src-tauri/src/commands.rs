@@ -823,30 +823,28 @@ pub async fn pick_split_app(
 ) -> Result<Option<crate::detect::SplitAppPick>, String> {
     use tauri_plugin_dialog::DialogExt;
 
-    let mut dialog = app
+    let dialog = app
         .dialog()
         .file()
         .set_title("Add app to split tunnel")
         .set_can_create_directories(false);
 
     #[cfg(target_os = "macos")]
-    {
-        dialog = dialog
-            .set_directory("/Applications")
-            .add_filter("Applications", &["app"]);
-    }
+    let dialog = dialog
+        .set_directory("/Applications")
+        .add_filter("Applications", &["app"]);
     #[cfg(target_os = "linux")]
-    {
+    let dialog = {
         let home_apps = dirs::home_dir()
             .map(|h| h.join(".local/share/applications"))
             .filter(|p| p.is_dir());
         if let Some(dir) = home_apps {
-            dialog = dialog.set_directory(dir);
+            dialog.set_directory(dir)
         } else {
-            dialog = dialog.set_directory("/usr/share/applications");
+            dialog.set_directory("/usr/share/applications")
         }
         // No extension filter: pick .desktop entries or binaries under /usr/bin, etc.
-    }
+    };
 
     // Runs on a worker thread because this command is async.
     let Some(file) = dialog.blocking_pick_file() else {

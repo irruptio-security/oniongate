@@ -2,6 +2,7 @@
 //! Bridges are configured only on the Bridges tab — this path never fetches,
 //! races, or changes bridge preferences.
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::process::Command;
 use std::time::Duration;
 

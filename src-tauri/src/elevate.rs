@@ -1,8 +1,10 @@
 //! Run short shell scripts with administrator privileges.
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::process::Command;
 
 /// Escape for embedding inside `do shell script "…"` (AppleScript).
+#[cfg(target_os = "macos")]
 fn apple_script_escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }

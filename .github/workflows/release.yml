@@ -85,6 +85,9 @@ jobs:
     outputs:
       release_id: ${{ steps.release.outputs.id }}
       version: ${{ steps.release.outputs.version }}
+      prerelease: ${{ steps.signing.outputs.prerelease }}
+      macos_signed: ${{ steps.signing.outputs.macos_signed }}
+      windows_signed: ${{ steps.signing.outputs.windows_signed }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -96,7 +99,8 @@ jobs:
         run: node scripts/check-release.mjs "${GITHUB_REF_NAME}"
       - name: Extract release notes
         run: node scripts/extract-release-notes.mjs "${GITHUB_REF_NAME}" release-notes.md
-      - name: Validate signing credentials before creating a draft
+      - name: Resolve signing posture
+        id: signing
         env:
           UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           UPDATER_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -112,9 +116,16 @@ jobs:
           SOURCE_BRANCH: ${{ needs.verify.outputs.source_branch }}
         shell: bash
         run: |
+          version="${GITHUB_REF_NAME#v}"
+
+          # The updater keypair costs nothing to generate, so it stays a hard
+          # requirement: without it the updater manifest cannot be trusted.
+          for name in UPDATER_KEY UPDATER_PASSWORD; do
+            test -n "${!name}" || { echo "::error::Missing release secret $name"; exit 1; }
+          done
+
+          macos_signed=true
           for name in \
-            UPDATER_KEY \
-            UPDATER_PASSWORD \
             APPLE_CERTIFICATE \
             APPLE_CERTIFICATE_PASSWORD \
             APPLE_SIGNING_IDENTITY \
@@ -123,35 +134,87 @@ jobs:
             APPLE_API_ISSUER \
             APPLE_API_KEY_BASE64
           do
-            test -n "${!name}" || { echo "::error::Missing release secret $name"; exit 1; }
+            if [[ -z "${!name}" ]]; then macos_signed=false; fi
           done
-          version="${GITHUB_REF_NAME#v}"
+
+          windows_signed=true
           if [[ -z "$WINDOWS_CERTIFICATE" ]]; then
-            if [[ "$SOURCE_BRANCH" == staging || "$version" == *-* ]]; then
-              echo "::warning::Windows will be an unsigned prerelease"
-            else
-              echo "::error::Stable releases require WINDOWS_CERTIFICATE"
-              exit 1
-            fi
+            windows_signed=false
           elif [[ -z "$WINDOWS_CERTIFICATE_PASSWORD" ]]; then
             echo "::error::WINDOWS_CERTIFICATE_PASSWORD is required with WINDOWS_CERTIFICATE"
             exit 1
           fi
+
+          prerelease=false
+          if [[ "$SOURCE_BRANCH" == staging || "$version" == *-* ]]; then
+            prerelease=true
+          fi
+
+          # 1.0 is the trust milestone. Pre-1.0 may ship unsigned so the project
+          # can distribute builds before the paid signing programs are in place,
+          # but every stable release must be signed on every platform.
+          if [[ "$version" != 0.* && "$prerelease" == false ]]; then
+            if [[ "$macos_signed" != true ]]; then
+              echo "::error::Stable releases require the Apple signing and notarization secrets"
+              exit 1
+            fi
+            if [[ "$windows_signed" != true ]]; then
+              echo "::error::Stable releases require WINDOWS_CERTIFICATE"
+              exit 1
+            fi
+          fi
+
+          if [[ "$macos_signed" != true ]]; then
+            echo "::warning::macOS artifacts will be unsigned and un-notarized"
+          fi
+          if [[ "$windows_signed" != true ]]; then
+            echo "::warning::Windows artifacts will be unsigned"
+          fi
+
+          {
+            echo "macos_signed=$macos_signed"
+            echo "windows_signed=$windows_signed"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+      - name: Prepend unsigned-build warning to the release notes
+        if: >-
+          steps.signing.outputs.macos_signed != 'true' ||
+          steps.signing.outputs.windows_signed != 'true'
+        env:
+          MACOS_SIGNED: ${{ steps.signing.outputs.macos_signed }}
+          WINDOWS_SIGNED: ${{ steps.signing.outputs.windows_signed }}
+        shell: bash
+        run: |
+          {
+            echo "> [!WARNING]"
+            echo "> **This build is not signed with an OS vendor certificate.**"
+            echo "> Verify it against \`SHA256SUMS\` and the build provenance"
+            echo "> attestation before you run it."
+            echo ">"
+            if [[ "$MACOS_SIGNED" != true ]]; then
+              echo "> - **macOS**: unsigned and un-notarized. Gatekeeper will refuse the"
+              echo ">   first launch. See the install guide for the required steps."
+            fi
+            if [[ "$WINDOWS_SIGNED" != true ]]; then
+              echo "> - **Windows**: unsigned. SmartScreen will warn on first run."
+            fi
+            echo
+            cat release-notes.md
+          } > release-notes.annotated.md
+          mv release-notes.annotated.md release-notes.md
       - name: Create or refresh the draft release
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_BRANCH: ${{ needs.verify.outputs.source_branch }}
+          PRERELEASE: ${{ steps.signing.outputs.prerelease }}
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
-          prerelease=false
+          prerelease="$PRERELEASE"
           title_suffix=""
           if [[ "$SOURCE_BRANCH" == staging ]]; then
-            prerelease=true
             title_suffix=" (staging)"
-          elif [[ "$version" == *-* ]]; then
-            prerelease=true
           fi
 
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
@@ -236,33 +299,6 @@ jobs:
       - run: npm ci
       - name: Stage verified runtimes
         run: npm run deps
-      - name: Validate release credentials
-        shell: bash
-        env:
-          UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          UPDATER_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
-        run: |
-          test -n "$UPDATER_KEY" || { echo "::error::Missing TAURI_SIGNING_PRIVATE_KEY"; exit 1; }
-          test -n "$UPDATER_PASSWORD" || { echo "::error::Missing TAURI_SIGNING_PRIVATE_KEY_PASSWORD"; exit 1; }
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            test -n "$APPLE_CERTIFICATE" || { echo "::error::Missing APPLE_CERTIFICATE"; exit 1; }
-            test -n "$APPLE_CERTIFICATE_PASSWORD" || { echo "::error::Missing APPLE_CERTIFICATE_PASSWORD"; exit 1; }
-            test -n "$APPLE_SIGNING_IDENTITY" || { echo "::error::Missing APPLE_SIGNING_IDENTITY"; exit 1; }
-            test -n "$APPLE_TEAM_ID" || { echo "::error::Missing APPLE_TEAM_ID"; exit 1; }
-            test -n "$APPLE_API_KEY" || { echo "::error::Missing APPLE_API_KEY"; exit 1; }
-            test -n "$APPLE_API_ISSUER" || { echo "::error::Missing APPLE_API_ISSUER"; exit 1; }
-            test -n "$APPLE_API_KEY_BASE64" || { echo "::error::Missing APPLE_API_KEY_BASE64"; exit 1; }
-          fi
-          if [[ "$RUNNER_OS" == "Windows" && -z "$WINDOWS_CERTIFICATE" ]]; then
-            echo "::warning::Windows artifact is unsigned and prerelease-only"
-          fi
       - name: Build and stage privileged helper
         shell: bash
         env:
@@ -280,7 +316,7 @@ jobs:
           cp "$source_path" "$destination"
           if [[ "$RUNNER_OS" != "Windows" ]]; then chmod 755 "$destination"; fi
       - name: Prepare Apple notarization API key
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && needs.prepare.outputs.macos_signed == 'true'
         shell: bash
         env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
@@ -326,22 +362,29 @@ jobs:
           uploadUpdaterSignatures: true
           uploadWorkflowArtifacts: true
           retryAttempts: 5
-      - name: Verify macOS code signatures
+      - name: Verify macOS bundles
         if: runner.os == 'macOS'
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          MACOS_SIGNED: ${{ needs.prepare.outputs.macos_signed }}
         run: |
           app_bundle="$(printf '%s\n' src-tauri/target/"$TARGET"/release/bundle/macos/*.app | head -n 1)"
           test -d "$app_bundle"
           test -x "$app_bundle/Contents/MacOS/oniongate-helper"
           test -x "$app_bundle/Contents/MacOS/oniongate"
+          dmg="$(printf '%s\n' src-tauri/target/"$TARGET"/release/bundle/dmg/*.dmg | head -n 1)"
+          test -f "$dmg"
+
+          if [[ "$MACOS_SIGNED" != true ]]; then
+            echo "::warning::Skipping notarization checks for an unsigned build"
+            exit 0
+          fi
+
           codesign --verify --deep --strict --verbose=2 "$app_bundle"
           spctl --assess --type execute --verbose=4 "$app_bundle"
           xcrun stapler validate "$app_bundle"
-          dmg="$(printf '%s\n' src-tauri/target/"$TARGET"/release/bundle/dmg/*.dmg | head -n 1)"
-          test -f "$dmg"
           xcrun stapler validate "$dmg"
           helper_team="$(
             codesign -dv --verbose=4 "$app_bundle/Contents/MacOS/oniongate-helper" 2>&1 |
@@ -472,3 +515,17 @@ jobs:
           name: release-evidence-${{ github.ref_name }}
           if-no-files-found: error
           path: release-assets/
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          # Only flip the draft once every artifact, checksum, SBOM, and
+          # attestation is in place, so the tag is never briefly downloadable
+          # without its verification material.
+          latest=true
+          if [[ "$PRERELEASE" == true ]]; then latest=false; fi
+          gh release edit "$GITHUB_REF_NAME" \
+            --draft=false \
+            --prerelease="$PRERELEASE" \
+            --latest="$latest"

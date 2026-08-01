@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
@@ -615,7 +616,7 @@ pub fn install_shell_hook() -> Result<String, String> {
     // Keep a static env file alongside for `source` convenience.
     elevated_write_file(ETC_ENV_PATH, &etc_env_contents())?;
 
-    let mut updated = Vec::new();
+    let mut updated: Vec<String> = Vec::new();
 
     #[cfg(target_os = "linux")]
     {

@@ -7,7 +7,9 @@
 //! - Linux: a systemd system service.
 //! - Windows: a Windows service (SCM).
 
-use super::{client, HelperStatus, HELPER_LABEL};
+#[cfg(target_os = "macos")]
+use super::HELPER_LABEL;
+use super::{client, HelperStatus};
 
 #[allow(dead_code)]
 fn helper_binary() -> Result<std::path::PathBuf, String> {

@@ -162,15 +162,14 @@ fn is_executable(path: &Path) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Ok(meta) = fs::metadata(path) {
-            return meta.permissions().mode() & 0o111 != 0;
-        }
+        fs::metadata(path)
+            .map(|meta| meta.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
     }
     #[cfg(not(unix))]
     {
-        return true;
+        true
     }
-    false
 }
 
 /// Prefer app-bundled binaries, then PATH / Homebrew.
@@ -224,6 +223,7 @@ pub fn bundled_runtime_dir() -> Option<PathBuf> {
     })
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn apply_native_library_path(cmd: &mut Command, binary: &Path) {
     let Some(dir) = binary.parent() else {
         return;
@@ -247,6 +247,9 @@ fn apply_native_library_path(cmd: &mut Command, binary: &Path) {
         cmd.env(key, value);
     }
 }
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn apply_native_library_path(_cmd: &mut Command, _binary: &Path) {}
 
 fn find_brew_binary() -> Option<PathBuf> {
     find_binary("brew")
