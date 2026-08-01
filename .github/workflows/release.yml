@@ -234,7 +234,14 @@ jobs:
               --notes-file release-notes.md
           fi
 
-          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq .id)"
+          # A draft has no tag ref yet, so /releases/tags/{tag} returns 404 for
+          # it. Match on tag_name across the release list instead.
+          release_id="$(
+            gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+              --jq "[.[] | select(.tag_name == \"$GITHUB_REF_NAME\")] | first | .id"
+          )"
+          test -n "$release_id" && test "$release_id" != null
+
           echo "id=$release_id" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
