@@ -776,10 +776,15 @@ mod tests {
     fn torrc_block_pairs_each_directory_with_its_port() {
         let root = Path::new("/data/onion-sites");
         let block = torrc_block_for(&[site("blog", 3000, 80)], root);
+        // Tor expects the platform's own separator, so derive the expected
+        // directory rather than hard-coding a Unix path.
+        let dir = root.join("blog");
         assert_eq!(
             block,
-            "HiddenServiceDir /data/onion-sites/blog\n\
-             HiddenServicePort 80 127.0.0.1:3000\n"
+            format!(
+                "HiddenServiceDir {}\nHiddenServicePort 80 127.0.0.1:3000\n",
+                dir.display()
+            )
         );
     }
 
