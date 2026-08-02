@@ -211,36 +211,54 @@ jobs:
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
-          prerelease="$PRERELEASE"
-          title_suffix=""
+          title="OnionGate $GITHUB_REF_NAME"
           if [[ "$SOURCE_BRANCH" == staging ]]; then
-            title_suffix=" (staging)"
+            title="$title (staging)"
           fi
 
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release edit "$GITHUB_REF_NAME" \
-              --verify-tag \
-              --draft \
-              --prerelease="$prerelease" \
-              --latest=false \
-              --title "OnionGate $GITHUB_REF_NAME$title_suffix" \
-              --notes-file release-notes.md
-          else
-            flags=(--verify-tag --draft --latest=false)
-            if [[ "$prerelease" == true ]]; then flags+=(--prerelease); fi
-            gh release create "$GITHUB_REF_NAME" \
-              "${flags[@]}" \
-              --title "OnionGate $GITHUB_REF_NAME$title_suffix" \
-              --notes-file release-notes.md
-          fi
-
-          # A draft has no tag ref yet, so /releases/tags/{tag} returns 404 for
-          # it. Match on tag_name across the release list instead.
-          release_id="$(
+          # Drafts have no tag ref, so /releases/tags/{tag} never finds them and
+          # the list endpoint can still be serving a cached page seconds after a
+          # write. Create through the REST API so the id comes back with the
+          # response instead of from a follow-up query.
+          existing="$(
             gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
-              --jq "[.[] | select(.tag_name == \"$GITHUB_REF_NAME\")] | first | .id"
+              --jq "[.[] | select(.tag_name == \"$GITHUB_REF_NAME\")][0].id // empty"
           )"
-          test -n "$release_id" && test "$release_id" != null
+
+          body="$(
+            jq -n \
+              --arg tag "$GITHUB_REF_NAME" \
+              --arg name "$title" \
+              --rawfile notes release-notes.md \
+              --argjson prerelease "$PRERELEASE" \
+              '{
+                tag_name: $tag,
+                name: $name,
+                body: $notes,
+                draft: true,
+                prerelease: $prerelease,
+                make_latest: "false"
+              }'
+          )"
+
+          if [[ -n "$existing" ]]; then
+            release_id="$(
+              printf '%s' "$body" |
+                gh api --method PATCH \
+                  "repos/$GITHUB_REPOSITORY/releases/$existing" \
+                  --input - --jq .id
+            )"
+          else
+            release_id="$(
+              printf '%s' "$body" |
+                gh api --method POST \
+                  "repos/$GITHUB_REPOSITORY/releases" \
+                  --input - --jq .id
+            )"
+          fi
+
+          test -n "$release_id"
+          echo "Draft release id: $release_id"
 
           echo "id=$release_id" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -253,9 +271,6 @@ jobs:
       contents: write
     strategy:
       fail-fast: false
-      # tauri-action merges each target into latest.json. Serializing avoids
-      # concurrent delete/upload races that can drop platform entries.
-      max-parallel: 1
       matrix:
         include:
           - name: macOS Apple Silicon
@@ -366,10 +381,9 @@ jobs:
             --target ${{ matrix.target }}
             --bundles ${{ matrix.bundles }}
             --config src-tauri/tauri.release.conf.json
-          uploadUpdaterJson: true
-          updaterJsonPreferNsis: true
-          uploadUpdaterSignatures: true
-          uploadWorkflowArtifacts: true
+          # The metadata job assembles latest.json from the uploaded payloads,
+          # so builds never race to rewrite a shared manifest.
+          includeUpdaterJson: false
           retryAttempts: 5
       - name: Build and upload (unsigned macOS)
         if: runner.os == 'macOS' && needs.prepare.outputs.macos_signed != 'true'
@@ -386,10 +400,7 @@ jobs:
             --target ${{ matrix.target }}
             --bundles ${{ matrix.bundles }}
             --config src-tauri/tauri.release.conf.json
-          uploadUpdaterJson: true
-          updaterJsonPreferNsis: true
-          uploadUpdaterSignatures: true
-          uploadWorkflowArtifacts: true
+          includeUpdaterJson: false
           retryAttempts: 5
       - name: Verify macOS bundles
         if: runner.os == 'macOS'
@@ -497,16 +508,17 @@ jobs:
           mkdir -p release-assets
           gh release download "$GITHUB_REF_NAME" --dir release-assets --clobber
           rm -f release-assets/SHA256SUMS release-assets/SHA256SUMS.sig
-          rm -f release-assets/*.cdx.json
-      - name: Verify updater manifest covers every target
+          rm -f release-assets/*.cdx.json release-assets/latest.json
+      - name: Assemble the updater manifest
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          jq -e '
-            .platforms
-            | has("darwin-aarch64")
-              and has("darwin-x86_64")
-              and has("linux-x86_64")
-              and has("windows-x86_64")
-          ' release-assets/latest.json >/dev/null
+          node scripts/build-updater-manifest.mjs \
+            release-assets \
+            "$VERSION" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME" \
+            release-assets/latest.json
+          cat release-assets/latest.json
       - name: Generate source and sidecar SBOMs
         run: |
           cargo install cargo-cyclonedx --locked
@@ -531,6 +543,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "$GITHUB_REF_NAME" \
+            release-assets/latest.json \
             release-assets/SHA256SUMS \
             release-assets/SHA256SUMS.sig \
             release-assets/*.cdx.json \

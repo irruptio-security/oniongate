@@ -41,15 +41,17 @@ Only then does it create or refresh a draft release and build:
 
 The manual-install assets are two architecture-specific macOS DMGs containing
 `OnionGate.app`, a Windows NSIS setup EXE, and Linux AppImage/DEB/RPM packages.
-Tauri also uploads signed platform updater payloads and `latest.json`; those
-support in-app updates and are not substitutes for the primary installers.
+Tauri also uploads signed platform updater payloads; those support in-app
+updates and are not substitutes for the primary installers.
 
-Each target downloads verified sidecars, builds and stages
-`oniongate-helper`, creates updater signatures, and uploads installers to the
-same draft. Builds are serialized because each target merges its entry into
-`latest.json`; parallel writes can silently drop platforms.
+Each target downloads verified sidecars, builds and stages `oniongate-helper`,
+creates updater signatures, and uploads installers to the same draft. Targets
+build in parallel: none of them writes `latest.json`, so there is no shared
+manifest for them to race over.
 
-The metadata job requires all four updater platform keys, then:
+The metadata job then assembles `latest.json` from the uploaded payloads and
+their detached signatures, failing the release if any of the four platform keys
+is missing or unsigned. It also:
 
 - generates Cargo, npm, and pinned-sidecar CycloneDX SBOMs;
 - creates `SHA256SUMS` and signs it with the updater trust root;
