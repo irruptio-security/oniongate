@@ -53,7 +53,15 @@
     "resources": [
       "resources/runtime/**/*",
       "resources/licenses/**/*"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "depends": ["libevent-2.1-7"]
+      },
+      "rpm": {
+        "depends": ["libevent"]
+      }
+    }
   },
   "plugins": {
     "updater": {
