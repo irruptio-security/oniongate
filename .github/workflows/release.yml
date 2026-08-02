@@ -296,13 +296,7 @@ jobs:
           shared-key: release-${{ matrix.target }}
       - name: Linux prerequisites
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf
+        run: bash scripts/install-linux-build-deps.sh
       - run: npm ci
       - name: Stage verified runtimes
         run: npm run deps
@@ -344,7 +338,12 @@ jobs:
           $cert = Import-PfxCertificate -FilePath $path -CertStoreLocation Cert:\CurrentUser\My -Password $secure
           if (-not $cert) { throw "Windows signing certificate import failed" }
           "TAURI_CONFIG={""bundle"":{""windows"":{""certificateThumbprint"":""$($cert.Thumbprint)"",""digestAlgorithm"":""sha256"",""timestampUrl"":""http://timestamp.digicert.com""}}}" | Out-File -FilePath $env:GITHUB_ENV -Append
+      # Two variants because the bundler reads APPLE_CERTIFICATE with var_os:
+      # an empty-but-present value still enters the keychain import path and
+      # fails. GitHub Actions cannot omit an env key conditionally, so the
+      # unsigned path must not reference the Apple secrets at all.
       - name: Build, sign, and upload
+        if: runner.os != 'macOS' || needs.prepare.outputs.macos_signed == 'true'
         uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -357,10 +356,33 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
+          NO_STRIP: "true"
+          APPIMAGE_EXTRACT_AND_RUN: "1"
         with:
           releaseId: ${{ needs.prepare.outputs.release_id }}
           tagName: ${{ github.ref_name }}
           args: >-
+            --verbose
+            --target ${{ matrix.target }}
+            --bundles ${{ matrix.bundles }}
+            --config src-tauri/tauri.release.conf.json
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
+          uploadUpdaterSignatures: true
+          uploadWorkflowArtifacts: true
+          retryAttempts: 5
+      - name: Build and upload (unsigned macOS)
+        if: runner.os == 'macOS' && needs.prepare.outputs.macos_signed != 'true'
+        uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          tagName: ${{ github.ref_name }}
+          args: >-
+            --verbose
             --target ${{ matrix.target }}
             --bundles ${{ matrix.bundles }}
             --config src-tauri/tauri.release.conf.json

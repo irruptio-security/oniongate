@@ -1,0 +1,147 @@
+name: Bundle
+
+# Packaging-only smoke test. Builds installers for one platform on demand so
+# bundler problems can be reproduced without cutting a tag or touching a
+# release. Artifacts are unsigned and are never published.
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to package
+        required: true
+        default: linux
+        type: choice
+        options:
+          - linux
+          - macos-arm64
+          - macos-x86_64
+          - windows
+          - all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bundle-${{ github.ref }}-${{ inputs.platform }}
+  cancel-in-progress: true
+
+jobs:
+  select:
+    name: Select targets
+    runs-on: ubuntu-24.04
+    outputs:
+      include: ${{ steps.pick.outputs.include }}
+    steps:
+      - id: pick
+        env:
+          PLATFORM: ${{ inputs.platform }}
+        shell: bash
+        run: |
+          all='[
+            {"name":"linux","os":"ubuntu-22.04",
+             "target":"x86_64-unknown-linux-gnu","extension":"",
+             "bundles":"appimage,deb,rpm"},
+            {"name":"macos-arm64","os":"macos-15",
+             "target":"aarch64-apple-darwin","extension":"",
+             "bundles":"app,dmg"},
+            {"name":"macos-x86_64","os":"macos-15-intel",
+             "target":"x86_64-apple-darwin","extension":"",
+             "bundles":"app,dmg"},
+            {"name":"windows","os":"windows-2022",
+             "target":"x86_64-pc-windows-msvc","extension":".exe",
+             "bundles":"nsis"}
+          ]'
+          include="$(
+            jq -c --arg p "$PLATFORM" \
+              'if $p == "all" then . else map(select(.name == $p)) end' <<< "$all"
+          )"
+          echo "include=$include" >> "$GITHUB_OUTPUT"
+
+  bundle:
+    name: Bundle ${{ matrix.name }}
+    needs: select
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.select.outputs.include) }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          shared-key: release-${{ matrix.target }}
+      - name: Linux prerequisites
+        if: runner.os == 'Linux'
+        run: bash scripts/install-linux-build-deps.sh
+      - run: npm ci
+      - name: Stage verified runtimes
+        run: npm run deps
+      - name: Build and stage privileged helper
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          EXTENSION: ${{ matrix.extension }}
+        run: |
+          cargo build \
+            --manifest-path src-tauri/Cargo.toml \
+            --release \
+            --bin oniongate-helper \
+            --target "$TARGET"
+          source_path="src-tauri/target/$TARGET/release/oniongate-helper$EXTENSION"
+          destination="src-tauri/binaries/oniongate-helper-$TARGET$EXTENSION"
+          test -f "$source_path"
+          cp "$source_path" "$destination"
+          if [[ "$RUNNER_OS" != "Windows" ]]; then chmod 755 "$destination"; fi
+      - name: Build bundles
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          BUNDLES: ${{ matrix.bundles }}
+          # Updater payloads need a signing key; this workflow never publishes,
+          # so skip them rather than requiring the release secret.
+          NO_STRIP: "true"
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          CI: "true"
+        run: |
+          npm run tauri -- build \
+            --verbose \
+            --target "$TARGET" \
+            --bundles "$BUNDLES" \
+            --config src-tauri/tauri.release.conf.json \
+            --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      - name: Describe sidecars linuxdeploy has to scan
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          # `ldd` exits non-zero on statically linked Go sidecars, which is a
+          # known way to break linuxdeploy and its plugins.
+          for binary in src-tauri/binaries/*-"$TARGET"; do
+            [ -f "$binary" ] || continue
+            echo "---- $binary ----"
+            file -b "$binary" || true
+            ldd "$binary" >/dev/null 2>&1
+            echo "ldd exit: $?"
+          done
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: bundle-${{ matrix.name }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
+            src-tauri/target/${{ matrix.target }}/release/bundle/rpm/*.rpm
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
